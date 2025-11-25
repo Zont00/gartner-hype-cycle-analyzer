@@ -1,0 +1,22 @@
+# Core Framework
+fastapi>=0.104.1          # Web framework
+uvicorn[standard]>=0.24.0 # ASGI server with auto-reload for development
+pydantic>=2.5.0           # Data validation (FastAPI dependency)
+pydantic-settings>=2.1.0  # Environment-based configuration
+
+# HTTP Client for API calls
+httpx>=0.25.2             # Async HTTP client for calling external APIs
+aiofiles>=23.2.1          # Async file operations (if needed for caching)
+
+# Database
+aiosqlite>=0.19.0         # Async SQLite support for FastAPI
+
+# Environment Variables
+python-dotenv>=1.0.0      # Load .env files
+
+# Data Processing
+beautifulsoup4>=4.12.2    # HTML parsing for web scraping (news, social)
+lxml>=4.9.3               # XML/HTML parser (faster than html.parser)
+
+# Optional but useful for MVP
+requests>=2.31.0          # Fallback sync HTTP (some APIs might be simpler sync)

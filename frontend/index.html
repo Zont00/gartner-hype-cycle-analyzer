@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Gartner Hype Cycle Analyzer</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="container">
+        <h1>Gartner Hype Cycle Analyzer</h1>
+        <p class="subtitle">Analyze emerging technologies and discover their position on the Gartner Hype Cycle</p>
+
+        <div class="input-section">
+            <input
+                type="text"
+                id="keyword"
+                placeholder="Enter technology (e.g., 'quantum computing')"
+                autocomplete="off"
+            >
+            <button id="analyze-btn">Analyze</button>
+        </div>
+
+        <div id="loading" class="hidden">
+            <div class="spinner"></div>
+            <p>Analyzing technology...</p>
+        </div>
+
+        <div id="results" class="hidden">
+            <h2>Results for: <span id="result-keyword"></span></h2>
+            <div class="hype-cycle-viz">
+                <canvas id="hype-cycle-canvas" width="800" height="400"></canvas>
+            </div>
+            <div class="details">
+                <div class="detail-item">
+                    <strong>Phase:</strong> <span id="phase"></span>
+                </div>
+                <div class="detail-item">
+                    <strong>Confidence:</strong> <span id="confidence"></span>
+                </div>
+                <div class="detail-item">
+                    <strong>Reasoning:</strong> <span id="reasoning"></span>
+                </div>
+            </div>
+        </div>
+
+        <div id="error" class="hidden error"></div>
+    </div>
+    <script src="app.js"></script>
+</body>
+</html>

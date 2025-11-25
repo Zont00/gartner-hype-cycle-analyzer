@@ -1,0 +1,35 @@
+import aiosqlite
+from pathlib import Path
+
+DATABASE_PATH = Path(__file__).parent.parent.parent / "data" / "hype_cycle.db"
+
+async def get_db():
+    """Async context manager for database connections"""
+    async with aiosqlite.connect(DATABASE_PATH) as db:
+        db.row_factory = aiosqlite.Row  # Access columns by name
+        yield db
+
+async def init_db():
+    """Initialize database schema"""
+    DATABASE_PATH.parent.mkdir(exist_ok=True)  # Ensure data/ exists
+
+    async with aiosqlite.connect(DATABASE_PATH) as db:
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS analyses (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                keyword TEXT NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                phase TEXT NOT NULL,
+                confidence REAL,
+                reasoning TEXT,
+                social_data TEXT,
+                papers_data TEXT,
+                patents_data TEXT,
+                news_data TEXT,
+                finance_data TEXT,
+                expires_at TIMESTAMP
+            )
+        """)
+        await db.execute("CREATE INDEX IF NOT EXISTS idx_keyword ON analyses(keyword)")
+        await db.execute("CREATE INDEX IF NOT EXISTS idx_expires ON analyses(expires_at)")
+        await db.commit()

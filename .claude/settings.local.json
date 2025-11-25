@@ -6,7 +6,14 @@
       "Bash(git commit -m \"$(cat <<''EOF''\nAdd task: h-implement-patents-collector\n\nCreate task for implementing PatentsView patent data collector:\n- Integrates with PatentsView API\n- Collects patent filing trends and assignee diversity\n- Provides time-based and geographical distribution analysis\n- Returns standardized data format for LLM analysis\n- Success criteria defined (7 measurable outcomes)\n\nContext gathering deferred to task startup.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nCo-Authored-By: Claude <noreply@anthropic.com>\nEOF\n)\")",
       "Bash(git commit -m \"$(cat <<''EOF''\nAdd task: h-implement-news-collector\n\nCreate task for implementing GDELT news coverage collector:\n- Integrates with GDELT API\n- Collects news volume and sentiment/tone data\n- Provides time-based media attention trend analysis\n- Returns standardized data format for LLM analysis\n- Success criteria defined (7 measurable outcomes)\n\nContext gathering deferred to task startup.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nCo-Authored-By: Claude <noreply@anthropic.com>\nEOF\n)\")",
       "Bash(git commit:*)",
-      "Bash(sessions/bin/sessions.bat protocol startup-load sessions/tasks/h-implement-project-setup.md)"
+      "Bash(sessions/bin/sessions.bat protocol startup-load sessions/tasks/h-implement-project-setup.md)",
+      "Bash(mkdir:*)",
+      "Bash(touch:*)",
+      "Bash(python -m venv:*)",
+      "Bash(source:*)",
+      "Bash(python -m pip install:*)",
+      "Bash(curl:*)",
+      "Bash(cat:*)"
     ],
     "deny": [],
     "ask": []
