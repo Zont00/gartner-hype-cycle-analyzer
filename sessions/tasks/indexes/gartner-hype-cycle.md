@@ -9,8 +9,6 @@ description: MVP application that analyzes emerging technologies and positions t
 ## Active Tasks
 
 ### High Priority
-- `h-implement-project-setup.md` - Setup project structure, FastAPI backend, SQLite database, and minimal frontend
-- `h-implement-social-collector.md` - Implement Hacker News collector for social media signals
 - `h-implement-papers-collector.md` - Implement Semantic Scholar collector for research papers
 - `h-implement-patents-collector.md` - Implement PatentsView collector for patent data
 - `h-implement-news-collector.md` - Implement GDELT collector for news coverage
@@ -27,4 +25,5 @@ description: MVP application that analyzes emerging technologies and positions t
 ### Investigate
 
 ## Completed Tasks
-<!-- Move tasks here when completed, maintaining the format -->
+- `h-implement-project-setup.md` - Setup project structure, FastAPI backend, SQLite database, and minimal frontend
+- `h-implement-social-collector.md` - Implement Hacker News collector for social media signals

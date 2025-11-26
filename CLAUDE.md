@@ -24,7 +24,7 @@ The application follows a three-tier architecture:
 2. Frontend calls POST /api/analyze endpoint (C:\Users\Hp\Desktop\Gartner's Hype Cycle\backend\app\routers\analysis.py - to be implemented)
 3. Backend checks SQLite cache for recent analysis
 4. On cache miss, five collectors run in parallel:
-   - Social Media Collector (C:\Users\Hp\Desktop\Gartner's Hype Cycle\backend\app\collectors\social.py)
+   - Social Media Collector (C:\Users\Hp\Desktop\Gartner's Hype Cycle\backend\app\collectors\social.py) - IMPLEMENTED
    - Research Papers Collector (C:\Users\Hp\Desktop\Gartner's Hype Cycle\backend\app\collectors\papers.py)
    - Patent Collector (C:\Users\Hp\Desktop\Gartner's Hype Cycle\backend\app\collectors\patents.py)
    - News Collector (C:\Users\Hp\Desktop\Gartner's Hype Cycle\backend\app\collectors\news.py)
@@ -66,6 +66,18 @@ The application follows a three-tier architecture:
 - Abstract base class defining collect(keyword) -> Dict[str, Any]
 - All collectors inherit from BaseCollector
 - Standardized return structure for LLM consumption
+
+**Social Media Collector** (C:\Users\Hp\Desktop\Gartner's Hype Cycle\backend\app\collectors\social.py) - IMPLEMENTED
+- Queries Hacker News Algolia API (https://hn.algolia.com/api/v1/search)
+- Time-series analysis across three periods: 30 days, 6 months, 1 year (non-overlapping windows)
+- Metrics returned: mentions_30d, mentions_6m, mentions_1y, mentions_total
+- Engagement: avg_points_30d, avg_comments_30d, avg_points_6m, avg_comments_6m
+- Derived insights: sentiment (-1.0 to 1.0), recency (high/medium/low), growth_trend (increasing/stable/decreasing), momentum (accelerating/steady/decelerating)
+- Returns top 5 stories with titles, points, comments, age for LLM context
+- Graceful error handling - never raises exceptions, returns fallback data on failures
+- Errors tracked in "errors" field for partial failure visibility
+- IMPORTANT: Uses HTTPS endpoint (HTTP causes 301 redirect)
+- Test suite: 14 passing tests covering success, errors, edge cases (C:\Users\Hp\Desktop\Gartner's Hype Cycle\backend\tests\test_social_collector.py)
 
 **DeepSeek Analyzer** (C:\Users\Hp\Desktop\Gartner's Hype Cycle\backend\app\analyzers\deepseek.py)
 - Placeholder class for LLM integration
@@ -149,26 +161,35 @@ python -m http.server 3000
 
 ### Adding a New Collector
 
-1. Create file in backend/app/collectors/ (e.g., social.py)
+1. Create file in backend/app/collectors/ (e.g., papers.py)
 2. Inherit from BaseCollector
 3. Implement async collect(keyword) method
-4. Return standardized dict with metrics: mentions_count, sentiment, recency, growth_trend
+4. Return standardized dict with metrics appropriate for data source
 5. Handle API errors gracefully (return partial data or empty structure)
+6. MUST use async HTTP client (httpx.AsyncClient) for non-blocking I/O
+7. MUST return JSON-serializable data only (no datetime objects, use ISO strings)
+8. SHOULD include error field in response dict to track non-fatal issues
 
-Example structure:
+Example - see SocialCollector implementation:
 ```python
 from app.collectors.base import BaseCollector
 from typing import Dict, Any
+import httpx
 
 class SocialCollector(BaseCollector):
     async def collect(self, keyword: str) -> Dict[str, Any]:
-        # API calls to Twitter/Reddit
-        return {
-            "mentions_count": 1500,
-            "sentiment": 0.75,
-            "recency": "high",
-            "growth_trend": "increasing"
-        }
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            # Fetch data from API
+            response = await client.get(...)
+            # Process and return structured data
+            return {
+                "source": "hacker_news",
+                "mentions_30d": 124,
+                "sentiment": 0.65,
+                "recency": "high",
+                "growth_trend": "increasing",
+                "errors": []
+            }
 ```
 
 ### Adding a New API Endpoint
@@ -221,7 +242,7 @@ C:\Users\Hp\Desktop\Gartner's Hype Cycle\
 │   │   ├── collectors/
 │   │   │   ├── __init__.py
 │   │   │   ├── base.py          # Abstract BaseCollector interface
-│   │   │   ├── social.py        # Social media collector (to be implemented)
+│   │   │   ├── social.py        # Social media collector (IMPLEMENTED - Hacker News)
 │   │   │   ├── papers.py        # Research papers collector (to be implemented)
 │   │   │   ├── patents.py       # Patent collector (to be implemented)
 │   │   │   ├── news.py          # News collector (to be implemented)
@@ -237,8 +258,9 @@ C:\Users\Hp\Desktop\Gartner's Hype Cycle\
 │   │   │   └── __init__.py
 │   │   └── utils/               # Shared utilities (placeholder)
 │   │       └── __init__.py
-│   ├── tests/                   # Test files (placeholder)
-│   │   └── __init__.py
+│   ├── tests/                   # Test files
+│   │   ├── __init__.py
+│   │   └── test_social_collector.py  # SocialCollector tests (14 tests)
 │   ├── venv/                    # Python virtual environment (gitignored)
 │   ├── requirements.txt         # Python dependencies
 │   ├── .env.example             # Environment variable template
@@ -290,8 +312,8 @@ Before running collectors, check database for recent analysis of same keyword wh
 
 Based on project setup completion, upcoming tasks will implement:
 
-1. **Individual Collectors** (5 tasks):
-   - Social media scraping (Twitter/Reddit APIs or web scraping)
+1. **Individual Collectors** (5 tasks, 1/5 complete):
+   - ✓ Social media (Hacker News Algolia API) - COMPLETED
    - Research papers (arXiv, Google Scholar APIs)
    - Patent search (USPTO, Google Patents APIs)
    - News aggregation (News API or RSS feeds)
@@ -315,11 +337,40 @@ Based on project setup completion, upcoming tasks will implement:
 
 ## Testing
 
+### Running Tests
+
+```bash
+# Activate virtual environment
+cd backend
+source venv/Scripts/activate
+
+# Run all tests
+pytest
+
+# Run specific test file
+pytest tests/test_social_collector.py
+
+# Run with verbose output
+pytest -v
+
+# Run with coverage
+pytest --cov=app
+```
+
 ### Health Check Test
 ```bash
 curl http://localhost:8000/api/health
 # Expected: {"status":"healthy","database":"healthy","version":"0.1.0"}
 ```
+
+### Social Collector Test
+The SocialCollector has comprehensive test coverage (14 tests):
+- Success cases with typical API responses
+- Error handling (rate limits, timeouts, network errors)
+- Edge cases (zero results, partial failures, missing fields)
+- Sentiment calculation validation
+- Growth trend detection
+- JSON serialization verification
 
 ### API Documentation
 Access interactive Swagger UI at http://localhost:8000/api/docs to test endpoints directly in browser.

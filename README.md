@@ -71,7 +71,7 @@ backend/
     database.py       # Database initialization
     collectors/       # Data collection modules
       base.py         # Base collector interface
-      social.py       # Social media collector (to be implemented)
+      social.py       # Social media collector (IMPLEMENTED - Hacker News)
       papers.py       # Research papers collector (to be implemented)
       patents.py      # Patent collector (to be implemented)
       news.py         # News collector (to be implemented)
@@ -82,6 +82,8 @@ backend/
       health.py       # Health check endpoint
       analysis.py     # Main analysis endpoint (to be implemented)
     utils/            # Shared utilities
+  tests/              # Test suite
+    test_social_collector.py  # 14 tests for SocialCollector
 frontend/
   index.html          # Web interface
   app.js              # Frontend logic
@@ -147,18 +149,40 @@ See `backend/.env.example` for all available configuration options:
 - `DATABASE_PATH` - Path to SQLite database
 - `CACHE_TTL_HOURS` - Cache expiration time
 
-## Next Steps
+## Implementation Status
 
-This project setup provides the foundation. Subsequent tasks will implement:
+### Completed
+- ✓ Project setup and configuration
+- ✓ FastAPI backend with health check endpoint
+- ✓ Database schema and async SQLite integration
+- ✓ Social media collector (Hacker News) with comprehensive tests
 
-1. Data collectors (social, papers, patents, news, finance)
+### Next Steps
+
+Subsequent tasks will implement:
+
+1. Data collectors (4 remaining: papers, patents, news, finance)
 2. DeepSeek analyzer with prompt engineering
 3. Analysis endpoint with caching logic
 4. Enhanced frontend visualization
 
 ## Testing
 
-To verify the setup:
+### Run Unit Tests
+
+```bash
+cd backend
+source venv/Scripts/activate
+pytest
+
+# Run with verbose output
+pytest -v
+
+# Run specific test file
+pytest tests/test_social_collector.py
+```
+
+### Verify Backend Setup
 
 ```bash
 # 1. Ensure server is running
@@ -171,6 +195,9 @@ curl http://localhost:8000/api/health
 
 # Expected: {"status":"healthy","database":"healthy","version":"0.1.0"}
 ```
+
+### Test Coverage
+- **SocialCollector**: 14 tests covering API integration, error handling, edge cases
 
 ## License
 
