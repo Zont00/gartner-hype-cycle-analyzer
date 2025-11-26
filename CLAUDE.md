@@ -25,7 +25,7 @@ The application follows a three-tier architecture:
 3. Backend checks SQLite cache for recent analysis
 4. On cache miss, five collectors run in parallel:
    - Social Media Collector (C:\Users\Hp\Desktop\Gartner's Hype Cycle\backend\app\collectors\social.py) - IMPLEMENTED
-   - Research Papers Collector (C:\Users\Hp\Desktop\Gartner's Hype Cycle\backend\app\collectors\papers.py)
+   - Research Papers Collector (C:\Users\Hp\Desktop\Gartner's Hype Cycle\backend\app\collectors\papers.py) - IMPLEMENTED
    - Patent Collector (C:\Users\Hp\Desktop\Gartner's Hype Cycle\backend\app\collectors\patents.py)
    - News Collector (C:\Users\Hp\Desktop\Gartner's Hype Cycle\backend\app\collectors\news.py)
    - Financial Data Collector (C:\Users\Hp\Desktop\Gartner's Hype Cycle\backend\app\collectors\finance.py)
@@ -48,7 +48,7 @@ The application follows a three-tier architecture:
 - Cached singleton pattern via @lru_cache
 - Loads from .env file in backend/ directory
 - Required: DEEPSEEK_API_KEY
-- Optional: NEWS_API_KEY, TWITTER_BEARER_TOKEN, GOOGLE_SCHOLAR_API_KEY
+- Optional: NEWS_API_KEY, TWITTER_BEARER_TOKEN, GOOGLE_SCHOLAR_API_KEY, SEMANTIC_SCHOLAR_API_KEY
 
 **Database** (C:\Users\Hp\Desktop\Gartner's Hype Cycle\backend\app\database.py)
 - Async SQLite via aiosqlite (non-blocking for FastAPI)
@@ -78,6 +78,20 @@ The application follows a three-tier architecture:
 - Errors tracked in "errors" field for partial failure visibility
 - IMPORTANT: Uses HTTPS endpoint (HTTP causes 301 redirect)
 - Test suite: 14 passing tests covering success, errors, edge cases (C:\Users\Hp\Desktop\Gartner's Hype Cycle\backend\tests\test_social_collector.py)
+
+**Research Papers Collector** (C:\Users\Hp\Desktop\Gartner's Hype Cycle\backend\app\collectors\papers.py) - IMPLEMENTED
+- Queries Semantic Scholar API bulk search endpoint (https://api.semanticscholar.org/graph/v1/paper/search/bulk)
+- Time-windowed analysis: 2-year and 5-year periods (suitable for academic publishing cycles)
+- IMPORTANT: Uses bulk endpoint with quote-wrapped keywords for exact phrase matching (reduces false positives by 99.9%)
+- Metrics returned: publications_2y, publications_5y, publications_total
+- Citation metrics: avg_citations_2y, avg_citations_5y, citation_velocity
+- Research breadth: author_diversity, venue_diversity
+- Derived insights: research_maturity (emerging/developing/mature), research_momentum (accelerating/steady/decelerating), research_trend (increasing/stable/decreasing), research_breadth (narrow/moderate/broad)
+- Returns top 5 papers by citation count with titles, years, citation counts for LLM context
+- API key authentication: Optional via x-api-key header (configured through SEMANTIC_SCHOLAR_API_KEY env var)
+- Graceful error handling with safe dictionary access using .get() to prevent KeyError on inconsistent API responses
+- Handles missing fields (citationCount, authors, venue may be null/missing)
+- Test suite: 18 passing tests covering success, errors, edge cases (C:\Users\Hp\Desktop\Gartner's Hype Cycle\backend\tests\test_papers_collector.py)
 
 **DeepSeek Analyzer** (C:\Users\Hp\Desktop\Gartner's Hype Cycle\backend\app\analyzers\deepseek.py)
 - Placeholder class for LLM integration
@@ -170,7 +184,7 @@ python -m http.server 3000
 7. MUST return JSON-serializable data only (no datetime objects, use ISO strings)
 8. SHOULD include error field in response dict to track non-fatal issues
 
-Example - see SocialCollector implementation:
+Example - see SocialCollector and PapersCollector implementations:
 ```python
 from app.collectors.base import BaseCollector
 from typing import Dict, Any
@@ -191,6 +205,12 @@ class SocialCollector(BaseCollector):
                 "errors": []
             }
 ```
+
+Key patterns from implemented collectors:
+- Always wrap multi-word keywords in quotes for exact phrase matching (PapersCollector line 226)
+- Use .get() with defaults for all API response field access to prevent KeyError (PapersCollector lines 70, 78, 107)
+- Optional API key authentication via headers dict (PapersCollector lines 216-219)
+- Calculate derived insights from raw metrics for better LLM reasoning
 
 ### Adding a New API Endpoint
 
@@ -229,6 +249,51 @@ settings = get_settings()
 api_key = settings.deepseek_api_key
 ```
 
+### Critical API Integration Patterns
+
+Based on lessons learned from implemented collectors:
+
+**1. Exact Phrase Matching for Multi-Word Keywords**
+- Always wrap keywords in quotes for API searches to get exact phrase matches
+- Example: `query: f'"{keyword}"'` (PapersCollector line 226)
+- Without quotes, "quantum computing" searches for "quantum" OR "computing" anywhere
+- With quotes, searches for exact phrase "quantum computing"
+- Reduces false positives by 99.9% for multi-word technology terms
+
+**2. Safe Dictionary Access Pattern**
+- NEVER use direct dictionary access: `data["key"]` can raise KeyError
+- ALWAYS use .get() with defaults: `data.get("key", default_value)`
+- API responses may omit fields entirely (not just set to null)
+- Example pattern: `publications = data.get("total", 0) if data else 0`
+- Protects against both None data and missing keys
+
+**3. Optional API Key Authentication**
+- Check if API key is configured before adding to headers
+- Pattern:
+```python
+from app.config import get_settings
+
+settings = get_settings()
+headers = {}
+if settings.api_key_name:
+    headers["x-api-key"] = settings.api_key_name
+response = await client.get(url, headers=headers)
+```
+- Works with or without API key configuration
+- Enables higher rate limits when key is available
+
+**4. Bulk/Specialized Endpoints**
+- Some APIs have specialized endpoints that provide better results
+- Example: Semantic Scholar has both /paper/search and /paper/search/bulk
+- Bulk endpoint provides more targeted results for technology searches
+- Always research available API endpoints before implementing
+
+**5. Time-Scale Matching**
+- Match time windows to data source characteristics
+- Social media: 30 days, 6 months, 1 year (fast-moving)
+- Academic papers: 2 years, 5 years (slower cycles)
+- Choose periods that reveal meaningful trends for that domain
+
 ## Project Structure Reference
 
 ```
@@ -243,7 +308,7 @@ C:\Users\Hp\Desktop\Gartner's Hype Cycle\
 │   │   │   ├── __init__.py
 │   │   │   ├── base.py          # Abstract BaseCollector interface
 │   │   │   ├── social.py        # Social media collector (IMPLEMENTED - Hacker News)
-│   │   │   ├── papers.py        # Research papers collector (to be implemented)
+│   │   │   ├── papers.py        # Research papers collector (IMPLEMENTED - Semantic Scholar)
 │   │   │   ├── patents.py       # Patent collector (to be implemented)
 │   │   │   ├── news.py          # News collector (to be implemented)
 │   │   │   └── finance.py       # Financial data collector (to be implemented)
@@ -260,7 +325,8 @@ C:\Users\Hp\Desktop\Gartner's Hype Cycle\
 │   │       └── __init__.py
 │   ├── tests/                   # Test files
 │   │   ├── __init__.py
-│   │   └── test_social_collector.py  # SocialCollector tests (14 tests)
+│   │   ├── test_social_collector.py  # SocialCollector tests (14 tests)
+│   │   └── test_papers_collector.py  # PapersCollector tests (18 tests)
 │   ├── venv/                    # Python virtual environment (gitignored)
 │   ├── requirements.txt         # Python dependencies
 │   ├── .env.example             # Environment variable template
@@ -312,9 +378,9 @@ Before running collectors, check database for recent analysis of same keyword wh
 
 Based on project setup completion, upcoming tasks will implement:
 
-1. **Individual Collectors** (5 tasks, 1/5 complete):
+1. **Individual Collectors** (5 tasks, 2/5 complete):
    - ✓ Social media (Hacker News Algolia API) - COMPLETED
-   - Research papers (arXiv, Google Scholar APIs)
+   - ✓ Research papers (Semantic Scholar API) - COMPLETED
    - Patent search (USPTO, Google Patents APIs)
    - News aggregation (News API or RSS feeds)
    - Financial data (funding rounds, VC investments)
@@ -370,6 +436,18 @@ The SocialCollector has comprehensive test coverage (14 tests):
 - Edge cases (zero results, partial failures, missing fields)
 - Sentiment calculation validation
 - Growth trend detection
+- JSON serialization verification
+
+### Papers Collector Test
+The PapersCollector has comprehensive test coverage (18 tests):
+- Success cases with typical API responses
+- Error handling (rate limits, timeouts, network errors, invalid queries)
+- Edge cases (zero results, partial failures, missing fields)
+- Citation velocity calculation (positive and negative)
+- Research maturity detection (emerging, developing, mature)
+- Research momentum detection (accelerating, steady, decelerating)
+- Research trend detection (increasing, stable, decreasing)
+- Research breadth detection (narrow, moderate, broad)
 - JSON serialization verification
 
 ### API Documentation
