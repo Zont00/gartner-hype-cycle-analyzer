@@ -13,7 +13,8 @@
       "Bash(source:*)",
       "Bash(python -m pip install:*)",
       "Bash(curl:*)",
-      "Bash(cat:*)"
+      "Bash(cat:*)",
+      "Bash(sessions/bin/sessions.bat protocol startup-load sessions/tasks/h-implement-social-collector.md)"
     ],
     "deny": [],
     "ask": []
