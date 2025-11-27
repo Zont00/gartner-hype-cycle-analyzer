@@ -27,7 +27,7 @@ The application follows a three-tier architecture:
    - Social Media Collector (C:\Users\Hp\Desktop\Gartner's Hype Cycle\backend\app\collectors\social.py) - IMPLEMENTED
    - Research Papers Collector (C:\Users\Hp\Desktop\Gartner's Hype Cycle\backend\app\collectors\papers.py) - IMPLEMENTED
    - Patent Collector (C:\Users\Hp\Desktop\Gartner's Hype Cycle\backend\app\collectors\patents.py) - IMPLEMENTED
-   - News Collector (C:\Users\Hp\Desktop\Gartner's Hype Cycle\backend\app\collectors\news.py)
+   - News Collector (C:\Users\Hp\Desktop\Gartner's Hype Cycle\backend\app\collectors\news.py) - IMPLEMENTED
    - Financial Data Collector (C:\Users\Hp\Desktop\Gartner's Hype Cycle\backend\app\collectors\finance.py)
 5. DeepSeek analyzer classifies technology into hype cycle phase (C:\Users\Hp\Desktop\Gartner's Hype Cycle\backend\app\analyzers\deepseek.py)
 6. Result cached in database and returned to frontend
@@ -111,6 +111,25 @@ The application follows a three-tier architecture:
 - Handles missing fields (assignees, assignee_country, citation counts may be null/missing)
 - Test suite: 20 passing tests covering success, errors, edge cases, authentication (C:\Users\Hp\Desktop\Gartner's Hype Cycle\backend\tests\test_patents_collector.py)
 - Real API validation: Successfully tested with "quantum computing" using _text_all operator (889 patents found with 96% reduction in false positives, 84 unique assignees, 16 countries)
+
+**News Collector** (C:\Users\Hp\Desktop\Gartner's Hype Cycle\backend\app\collectors\news.py) - IMPLEMENTED
+- Queries GDELT Doc API v2 (https://api.gdeltproject.org/api/v2/doc/doc)
+- Time-windowed analysis: 30 days, 3 months (excluding last 30d), 1 year (excluding last 3m) - matches news cycle characteristics
+- IMPORTANT: Uses quote wrapping for exact phrase matching (same pattern as PapersCollector - reduces false positives by ~99%)
+- Three API modes queried per time period: ArtList (article metadata), TimelineVol (volume trends), ToneChart (sentiment distribution)
+- API parameters: Uses GDELT datetime format (YYYYMMDDHHMMSS), maxrecords=250 per period (750 total articles)
+- Metrics returned: articles_30d, articles_3m, articles_1y, articles_total
+- Geographic distribution: source_countries dict, geographic_diversity (unique country count)
+- Media diversity: unique_domains, top_domains (top 5 by article count)
+- Sentiment metrics: avg_tone (-1.0 to 1.0 scale), tone_distribution (positive/neutral/negative counts)
+- Volume metrics: volume_intensity_30d, volume_intensity_3m, volume_intensity_1y (average intensity from timeline data)
+- Derived insights: media_attention (high/medium/low based on article count thresholds), coverage_trend (increasing/stable/decreasing from volume comparison), sentiment_trend (positive/neutral/negative from tone), mainstream_adoption (mainstream/emerging/niche from domain diversity)
+- Returns top 5 most recent articles with URLs, titles, domains, countries, dates for LLM context
+- API key authentication: None required - GDELT is open access with no API key
+- Graceful error handling with safe dictionary access using .get() to prevent KeyError on inconsistent API responses
+- Handles missing fields (domain, sourcecountry, seendate may be null/missing)
+- Test suite: 16 passing tests covering success, errors, edge cases, sentiment/tone calculation, trend detection (C:\Users\Hp\Desktop\Gartner's Hype Cycle\backend\tests\test_news_collector.py)
+- Real API validation: Successfully tested with "quantum computing" (750 articles, 29 countries, 138 unique domains)
 
 **DeepSeek Analyzer** (C:\Users\Hp\Desktop\Gartner's Hype Cycle\backend\app\analyzers\deepseek.py)
 - Placeholder class for LLM integration
@@ -226,12 +245,13 @@ class SocialCollector(BaseCollector):
 ```
 
 Key patterns from implemented collectors:
-- Always wrap multi-word keywords in quotes for exact phrase matching (PapersCollector line 226)
-- Use .get() with defaults for all API response field access to prevent KeyError (PapersCollector lines 70, 78, 107)
-- Optional API key authentication via headers dict (PapersCollector lines 216-219)
+- Always wrap multi-word keywords in quotes for exact phrase matching (PapersCollector line 226, NewsCollector line 242)
+- Use .get() with defaults for all API response field access to prevent KeyError (PapersCollector lines 70, 78, 107; NewsCollector lines 86-88, 97-109)
+- Optional API key authentication via headers dict (PapersCollector lines 216-219; PatentsCollector requires key, NewsCollector does not)
 - Manual URL encoding with urllib.parse.quote() for APIs that don't work with httpx params dict (PatentsCollector lines 313-318)
 - Use _text_all operator (not _text_any) for PatentsView API to prevent false positives (PatentsCollector lines 277-287)
-- Calculate derived insights from raw metrics for better LLM reasoning
+- Calculate derived insights from raw metrics for better LLM reasoning (all collectors)
+- Multiple API mode queries per period for richer data (NewsCollector: ArtList + TimelineVol + ToneChart)
 
 ### Adding a New API Endpoint
 
@@ -314,6 +334,7 @@ response = await client.get(url, headers=headers)
 - Social media: 30 days, 6 months, 1 year (fast-moving)
 - Academic papers: 2 years, 5 years (slower cycles)
 - Patents: 2 years, 5 years, 10 years (patent filing and grant cycles)
+- News media: 30 days, 3 months, 1 year (faster than patents, slower than social media)
 - Choose periods that reveal meaningful trends for that domain
 
 **6. Manual URL Encoding Pattern (PatentsView API)**
@@ -380,7 +401,7 @@ C:\Users\Hp\Desktop\Gartner's Hype Cycle\
 │   │   │   ├── social.py        # Social media collector (IMPLEMENTED - Hacker News)
 │   │   │   ├── papers.py        # Research papers collector (IMPLEMENTED - Semantic Scholar)
 │   │   │   ├── patents.py       # Patent collector (IMPLEMENTED - PatentsView)
-│   │   │   ├── news.py          # News collector (to be implemented)
+│   │   │   ├── news.py          # News collector (IMPLEMENTED - GDELT)
 │   │   │   └── finance.py       # Financial data collector (to be implemented)
 │   │   ├── analyzers/
 │   │   │   ├── __init__.py
@@ -397,7 +418,8 @@ C:\Users\Hp\Desktop\Gartner's Hype Cycle\
 │   │   ├── __init__.py
 │   │   ├── test_social_collector.py  # SocialCollector tests (14 tests)
 │   │   ├── test_papers_collector.py  # PapersCollector tests (18 tests)
-│   │   └── test_patents_collector.py # PatentsCollector tests (20 tests)
+│   │   ├── test_patents_collector.py # PatentsCollector tests (20 tests)
+│   │   └── test_news_collector.py    # NewsCollector tests (16 tests)
 │   ├── venv/                    # Python virtual environment (gitignored)
 │   ├── requirements.txt         # Python dependencies
 │   ├── .env.example             # Environment variable template
@@ -449,11 +471,11 @@ Before running collectors, check database for recent analysis of same keyword wh
 
 Based on project setup completion, upcoming tasks will implement:
 
-1. **Individual Collectors** (5 tasks, 3/5 complete):
+1. **Individual Collectors** (5 tasks, 4/5 complete):
    - ✓ Social media (Hacker News Algolia API) - COMPLETED
    - ✓ Research papers (Semantic Scholar API) - COMPLETED
    - ✓ Patent search (PatentsView Search API) - COMPLETED
-   - News aggregation (News API or RSS feeds)
+   - ✓ News aggregation (GDELT API) - COMPLETED
    - Financial data (funding rounds, VC investments)
 
 2. **DeepSeek Integration**:
@@ -532,6 +554,18 @@ The PatentsCollector has comprehensive test coverage (20 tests):
 - Patent maturity detection (emerging, mature)
 - Patent momentum detection (accelerating)
 - Patent trend detection (increasing)
+- JSON serialization verification
+
+### News Collector Test
+The NewsCollector has comprehensive test coverage (16 tests):
+- Success cases with typical API responses
+- Error handling (rate limits, timeouts, network errors)
+- Edge cases (zero results, partial failures, missing fields)
+- Tone calculation (all positive, all negative, mixed)
+- Coverage trend detection (increasing, decreasing, stable)
+- Media attention classification (high, medium, low)
+- Mainstream adoption detection (mainstream, emerging, niche)
+- Geographic diversity calculation
 - JSON serialization verification
 
 ### API Documentation
