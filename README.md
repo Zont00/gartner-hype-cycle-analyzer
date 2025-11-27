@@ -75,7 +75,7 @@ backend/
       papers.py       # Research papers collector (IMPLEMENTED - Semantic Scholar)
       patents.py      # Patent collector (IMPLEMENTED - PatentsView)
       news.py         # News collector (IMPLEMENTED - GDELT)
-      finance.py      # Financial data collector (to be implemented)
+      finance.py      # Financial data collector (IMPLEMENTED - Yahoo Finance + DeepSeek)
     analyzers/        # LLM integration
       deepseek.py     # DeepSeek API client (to be implemented)
     routers/          # API endpoints
@@ -87,6 +87,7 @@ backend/
     test_papers_collector.py  # 18 tests for PapersCollector
     test_patents_collector.py # 20 tests for PatentsCollector
     test_news_collector.py    # 16 tests for NewsCollector
+    test_finance_collector.py # 17 tests for FinanceCollector
 frontend/
   index.html          # Web interface
   app.js              # Frontend logic
@@ -164,15 +165,15 @@ See `backend/.env.example` for all available configuration options:
 - ✓ Research papers collector (Semantic Scholar) with comprehensive tests (18 tests)
 - ✓ Patent collector (PatentsView) with comprehensive tests (20 tests)
 - ✓ News collector (GDELT) with comprehensive tests (16 tests)
+- ✓ Financial data collector (Yahoo Finance + DeepSeek ticker discovery) with comprehensive tests (17 tests)
 
 ### Next Steps
 
 Subsequent tasks will implement:
 
-1. Data collectors (1 remaining: finance)
-2. DeepSeek analyzer with prompt engineering
-3. Analysis endpoint with caching logic
-4. Enhanced frontend visualization
+1. DeepSeek analyzer with prompt engineering for hype cycle classification
+2. Analysis endpoint with caching logic and parallel collector execution
+3. Enhanced frontend visualization
 
 ## Testing
 
@@ -209,6 +210,7 @@ curl http://localhost:8000/api/health
 - **PapersCollector**: 18 tests covering API integration, error handling, edge cases, citation metrics, derived insights
 - **PatentsCollector**: 20 tests covering API integration, error handling, edge cases, authentication, filing velocity, geographic reach
 - **NewsCollector**: 16 tests covering API integration, error handling, edge cases, sentiment/tone calculation, coverage trends, media attention
+- **FinanceCollector**: 17 tests covering DeepSeek integration, yfinance mocking, error handling, edge cases, market maturity, investor sentiment, instance isolation
 
 ## License
 
