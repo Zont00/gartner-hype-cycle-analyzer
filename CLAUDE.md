@@ -26,7 +26,7 @@ The application follows a three-tier architecture:
 4. On cache miss, five collectors run in parallel:
    - Social Media Collector (C:\Users\Hp\Desktop\Gartner's Hype Cycle\backend\app\collectors\social.py) - IMPLEMENTED
    - Research Papers Collector (C:\Users\Hp\Desktop\Gartner's Hype Cycle\backend\app\collectors\papers.py) - IMPLEMENTED
-   - Patent Collector (C:\Users\Hp\Desktop\Gartner's Hype Cycle\backend\app\collectors\patents.py)
+   - Patent Collector (C:\Users\Hp\Desktop\Gartner's Hype Cycle\backend\app\collectors\patents.py) - IMPLEMENTED
    - News Collector (C:\Users\Hp\Desktop\Gartner's Hype Cycle\backend\app\collectors\news.py)
    - Financial Data Collector (C:\Users\Hp\Desktop\Gartner's Hype Cycle\backend\app\collectors\finance.py)
 5. DeepSeek analyzer classifies technology into hype cycle phase (C:\Users\Hp\Desktop\Gartner's Hype Cycle\backend\app\analyzers\deepseek.py)
@@ -47,7 +47,7 @@ The application follows a three-tier architecture:
 - Uses pydantic-settings for type-safe environment variable loading
 - Cached singleton pattern via @lru_cache
 - Loads from .env file in backend/ directory
-- Required: DEEPSEEK_API_KEY
+- Required: DEEPSEEK_API_KEY, PATENTSVIEW_API_KEY
 - Optional: NEWS_API_KEY, TWITTER_BEARER_TOKEN, GOOGLE_SCHOLAR_API_KEY, SEMANTIC_SCHOLAR_API_KEY
 
 **Database** (C:\Users\Hp\Desktop\Gartner's Hype Cycle\backend\app\database.py)
@@ -92,6 +92,25 @@ The application follows a three-tier architecture:
 - Graceful error handling with safe dictionary access using .get() to prevent KeyError on inconsistent API responses
 - Handles missing fields (citationCount, authors, venue may be null/missing)
 - Test suite: 18 passing tests covering success, errors, edge cases (C:\Users\Hp\Desktop\Gartner's Hype Cycle\backend\tests\test_papers_collector.py)
+
+**Patent Collector** (C:\Users\Hp\Desktop\Gartner's Hype Cycle\backend\app\collectors\patents.py) - IMPLEMENTED
+- Queries PatentsView Search API (https://search.patentsview.org/api/v1/patent/)
+- Time-windowed analysis: 2-year, 5-year, and 10-year periods (non-overlapping windows matching patent filing cycles)
+- CRITICAL: Requires manual URL encoding with urllib.parse.quote() - httpx params dict encoding does NOT work with this API
+- API uses GET requests with JSON-stringified query parameters that must be manually URL-encoded
+- Field names: patent_id (not patent_number), patent_num_times_cited_by_us_patents (for citations)
+- CRITICAL: Query operator: _text_all for keyword matching in patent_title and patent_abstract fields (ensures ALL words present, prevents false positives)
+- Metrics returned: patents_2y, patents_5y, patents_10y, patents_total
+- Assignee metrics: unique_assignees, top_assignees (top 5 by patent count)
+- Geographic distribution: countries dict with patent counts, geographic_diversity
+- Citation metrics: avg_citations_2y, avg_citations_5y
+- Derived insights: filing_velocity, assignee_concentration (concentrated/moderate/diverse), geographic_reach (domestic/regional/global), patent_maturity (emerging/developing/mature), patent_momentum (accelerating/steady/decelerating), patent_trend (increasing/stable/decreasing)
+- Returns top 5 patents sorted by citation count with patent numbers, titles, dates, assignees, countries for LLM context
+- API key authentication: Required via X-Api-Key header (configured through PATENTSVIEW_API_KEY env var)
+- Graceful error handling with safe dictionary access using .get() to prevent KeyError on inconsistent API responses
+- Handles missing fields (assignees, assignee_country, citation counts may be null/missing)
+- Test suite: 20 passing tests covering success, errors, edge cases, authentication (C:\Users\Hp\Desktop\Gartner's Hype Cycle\backend\tests\test_patents_collector.py)
+- Real API validation: Successfully tested with "quantum computing" using _text_all operator (889 patents found with 96% reduction in false positives, 84 unique assignees, 16 countries)
 
 **DeepSeek Analyzer** (C:\Users\Hp\Desktop\Gartner's Hype Cycle\backend\app\analyzers\deepseek.py)
 - Placeholder class for LLM integration
@@ -210,6 +229,8 @@ Key patterns from implemented collectors:
 - Always wrap multi-word keywords in quotes for exact phrase matching (PapersCollector line 226)
 - Use .get() with defaults for all API response field access to prevent KeyError (PapersCollector lines 70, 78, 107)
 - Optional API key authentication via headers dict (PapersCollector lines 216-219)
+- Manual URL encoding with urllib.parse.quote() for APIs that don't work with httpx params dict (PatentsCollector lines 313-318)
+- Use _text_all operator (not _text_any) for PatentsView API to prevent false positives (PatentsCollector lines 277-287)
 - Calculate derived insights from raw metrics for better LLM reasoning
 
 ### Adding a New API Endpoint
@@ -292,7 +313,56 @@ response = await client.get(url, headers=headers)
 - Match time windows to data source characteristics
 - Social media: 30 days, 6 months, 1 year (fast-moving)
 - Academic papers: 2 years, 5 years (slower cycles)
+- Patents: 2 years, 5 years, 10 years (patent filing and grant cycles)
 - Choose periods that reveal meaningful trends for that domain
+
+**6. Manual URL Encoding Pattern (PatentsView API)**
+- CRITICAL: Some APIs don't work with httpx's built-in params dict encoding
+- PatentsView API requires manual URL encoding using urllib.parse.quote()
+- Pattern:
+```python
+from urllib.parse import quote
+import json
+
+query = {"_and": [...]}
+fields = ["patent_id", "patent_title", ...]
+options = {"size": 100}
+
+# Manually construct URL with encoded JSON params
+q = json.dumps(query)
+f = json.dumps(fields)
+o = json.dumps(options)
+url = f'{API_URL}?q={quote(q)}&f={quote(f)}&o={quote(o)}'
+
+# Use URL directly, not params dict
+response = await client.get(url, headers=headers)
+```
+- This pattern was discovered through debugging PatentsView integration
+- Without manual encoding, API returns 400 "Invalid query parameters"
+- NEVER use params dict with PatentsView API
+
+**7. Query Operator Selection for Multi-Word Keywords (PatentsView API)**
+- CRITICAL: Use _text_all operator for multi-word technology terms, NOT _text_any
+- _text_all: Matches documents containing ALL words (e.g., "quantum computing" requires both "quantum" AND "computing")
+- _text_any: Matches documents containing ANY word (e.g., "quantum computing" matches "quantum mechanics" OR "distributed computing")
+- Pattern:
+```python
+query = {
+    "_and": [
+        {
+            "_or": [
+                {"_text_all": {"patent_title": keyword}},
+                {"_text_all": {"patent_abstract": keyword}}
+            ]
+        },
+        {"_gte": {"patent_date": date_start}},
+        {"_lte": {"patent_date": date_end}}
+    ]
+}
+```
+- Using _text_all prevents false positives - reduces "quantum computing" results from 22,886 to 889 (96% reduction)
+- Without _text_all, searches return patents containing ANY keyword, drastically reducing result relevance
+- This pattern is essential for accurate technology analysis
 
 ## Project Structure Reference
 
@@ -309,7 +379,7 @@ C:\Users\Hp\Desktop\Gartner's Hype Cycle\
 │   │   │   ├── base.py          # Abstract BaseCollector interface
 │   │   │   ├── social.py        # Social media collector (IMPLEMENTED - Hacker News)
 │   │   │   ├── papers.py        # Research papers collector (IMPLEMENTED - Semantic Scholar)
-│   │   │   ├── patents.py       # Patent collector (to be implemented)
+│   │   │   ├── patents.py       # Patent collector (IMPLEMENTED - PatentsView)
 │   │   │   ├── news.py          # News collector (to be implemented)
 │   │   │   └── finance.py       # Financial data collector (to be implemented)
 │   │   ├── analyzers/
@@ -326,7 +396,8 @@ C:\Users\Hp\Desktop\Gartner's Hype Cycle\
 │   ├── tests/                   # Test files
 │   │   ├── __init__.py
 │   │   ├── test_social_collector.py  # SocialCollector tests (14 tests)
-│   │   └── test_papers_collector.py  # PapersCollector tests (18 tests)
+│   │   ├── test_papers_collector.py  # PapersCollector tests (18 tests)
+│   │   └── test_patents_collector.py # PatentsCollector tests (20 tests)
 │   ├── venv/                    # Python virtual environment (gitignored)
 │   ├── requirements.txt         # Python dependencies
 │   ├── .env.example             # Environment variable template
@@ -378,10 +449,10 @@ Before running collectors, check database for recent analysis of same keyword wh
 
 Based on project setup completion, upcoming tasks will implement:
 
-1. **Individual Collectors** (5 tasks, 2/5 complete):
+1. **Individual Collectors** (5 tasks, 3/5 complete):
    - ✓ Social media (Hacker News Algolia API) - COMPLETED
    - ✓ Research papers (Semantic Scholar API) - COMPLETED
-   - Patent search (USPTO, Google Patents APIs)
+   - ✓ Patent search (PatentsView Search API) - COMPLETED
    - News aggregation (News API or RSS feeds)
    - Financial data (funding rounds, VC investments)
 
@@ -448,6 +519,19 @@ The PapersCollector has comprehensive test coverage (18 tests):
 - Research momentum detection (accelerating, steady, decelerating)
 - Research trend detection (increasing, stable, decreasing)
 - Research breadth detection (narrow, moderate, broad)
+- JSON serialization verification
+
+### Patents Collector Test
+The PatentsCollector has comprehensive test coverage (20 tests):
+- Success cases with typical API responses
+- Error handling (rate limits, timeouts, network errors, authentication failures)
+- Edge cases (zero results, partial failures, missing fields, missing API key)
+- Filing velocity calculation (positive and negative)
+- Assignee concentration detection (concentrated, diverse)
+- Geographic reach detection (domestic, global)
+- Patent maturity detection (emerging, mature)
+- Patent momentum detection (accelerating)
+- Patent trend detection (increasing)
 - JSON serialization verification
 
 ### API Documentation

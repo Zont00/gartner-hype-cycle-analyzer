@@ -73,7 +73,7 @@ backend/
       base.py         # Base collector interface
       social.py       # Social media collector (IMPLEMENTED - Hacker News)
       papers.py       # Research papers collector (IMPLEMENTED - Semantic Scholar)
-      patents.py      # Patent collector (to be implemented)
+      patents.py      # Patent collector (IMPLEMENTED - PatentsView)
       news.py         # News collector (to be implemented)
       finance.py      # Financial data collector (to be implemented)
     analyzers/        # LLM integration
@@ -85,6 +85,7 @@ backend/
   tests/              # Test suite
     test_social_collector.py  # 14 tests for SocialCollector
     test_papers_collector.py  # 18 tests for PapersCollector
+    test_patents_collector.py # 20 tests for PatentsCollector
 frontend/
   index.html          # Web interface
   app.js              # Frontend logic
@@ -145,6 +146,7 @@ Analyzes a technology and positions it on the Hype Cycle.
 See `backend/.env.example` for all available configuration options:
 
 - `DEEPSEEK_API_KEY` - Required for LLM analysis
+- `PATENTSVIEW_API_KEY` - Required for patents collector
 - `NEWS_API_KEY` - Optional for news collector
 - `TWITTER_BEARER_TOKEN` - Optional for social media collector
 - `SEMANTIC_SCHOLAR_API_KEY` - Optional for research papers collector (higher rate limits)
@@ -159,12 +161,13 @@ See `backend/.env.example` for all available configuration options:
 - ✓ Database schema and async SQLite integration
 - ✓ Social media collector (Hacker News) with comprehensive tests (14 tests)
 - ✓ Research papers collector (Semantic Scholar) with comprehensive tests (18 tests)
+- ✓ Patent collector (PatentsView) with comprehensive tests (20 tests)
 
 ### Next Steps
 
 Subsequent tasks will implement:
 
-1. Data collectors (3 remaining: patents, news, finance)
+1. Data collectors (2 remaining: news, finance)
 2. DeepSeek analyzer with prompt engineering
 3. Analysis endpoint with caching logic
 4. Enhanced frontend visualization
@@ -202,6 +205,7 @@ curl http://localhost:8000/api/health
 ### Test Coverage
 - **SocialCollector**: 14 tests covering API integration, error handling, edge cases
 - **PapersCollector**: 18 tests covering API integration, error handling, edge cases, citation metrics, derived insights
+- **PatentsCollector**: 20 tests covering API integration, error handling, edge cases, authentication, filing velocity, geographic reach
 
 ## License
 
