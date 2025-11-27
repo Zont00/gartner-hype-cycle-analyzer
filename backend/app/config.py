@@ -8,6 +8,7 @@ class Settings(BaseSettings):
     twitter_bearer_token: str | None = None
     google_scholar_api_key: str | None = None
     semantic_scholar_api_key: str | None = None
+    patentsview_api_key: str | None = None
 
     # Database
     database_path: str = "data/hype_cycle.db"
