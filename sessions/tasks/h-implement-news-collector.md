@@ -1,7 +1,7 @@
 ---
 name: h-implement-news-collector
 branch: feature/news-collector
-status: pending
+status: in-progress
 created: 2025-11-25
 ---
 
