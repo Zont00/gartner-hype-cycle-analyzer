@@ -153,15 +153,34 @@ The application follows a three-tier architecture:
 - Test suite: 17 passing tests covering success, DeepSeek integration, yfinance mocking, errors (rate limits, timeouts, missing API keys), edge cases (invalid tickers, missing data, partial failures), derived insights (maturity, sentiment, trends), instance isolation, JSON serialization (C:\Users\Hp\Desktop\Gartner's Hype Cycle\backend\tests\test_finance_collector.py)
 - Real API validation: Successfully tested with "quantum computing" (6 companies, $7.9T market cap, developing/positive) and "plant cell culture" (5 companies, $158B market cap, mature/negative)
 
-**DeepSeek Analyzer** (C:\Users\Hp\Desktop\Gartner's Hype Cycle\backend\app\analyzers\deepseek.py)
-- Placeholder class for LLM integration
-- Will implement prompt engineering to classify into 5 phases:
+**DeepSeek Analyzer** (C:\Users\Hp\Desktop\Gartner's Hype Cycle\backend\app\analyzers\deepseek.py) - IMPLEMENTED
+- Two-stage LLM analysis architecture: 5 per-source classifications + 1 final synthesis (6 total API calls)
+- Classifies technologies into 5 Gartner Hype Cycle phases:
   - innovation_trigger: Innovation Trigger
   - peak: Peak of Inflated Expectations
   - trough: Trough of Disillusionment
   - slope: Slope of Enlightenment
   - plateau: Plateau of Productivity
-- analyze(keyword, collector_data) returns phase, confidence, reasoning
+- API endpoint: https://api.deepseek.com/v1/chat/completions (OpenAI-compatible)
+- Authentication: Bearer token via Authorization header (configured through DEEPSEEK_API_KEY env var)
+- Temperature: 0.3 (lower for more deterministic classification results)
+- Timeout: 60.0 seconds (LLM calls can be slow)
+- analyze(keyword, collector_data) returns {"phase": str, "confidence": float, "reasoning": str, "per_source_analyses": dict}
+- Specialized prompt templates for each data source:
+  - Social media prompt: focuses on mentions, engagement, sentiment, growth trends with thresholds (innovation_trigger: <50 mentions, peak: >200 in 30d)
+  - Academic research prompt: focuses on publications, citations, research maturity/momentum with thresholds (innovation_trigger: <10 papers in 2y, peak: accelerating publications)
+  - Patent prompt: focuses on filing velocity, assignee concentration, geographic reach with thresholds (innovation_trigger: <10 patents in 2y, peak: >20 assignees)
+  - News prompt: focuses on media attention, coverage trends, sentiment, mainstream adoption with thresholds (innovation_trigger: <50 articles, peak: >500 articles)
+  - Finance prompt: focuses on market maturity, investor sentiment, investment momentum with thresholds (innovation_trigger: <3 companies, peak: strong positive returns)
+- Each prompt includes full Gartner Hype Cycle phase definitions and interpretation guidance
+- Synthesis prompt: aggregates all 5 source analyses, weighs by confidence scores, handles conflicting signals
+- Response parsing: strips markdown code blocks (```json ... ```), validates required fields (phase, confidence, reasoning)
+- Validation: checks phase is one of 5 valid values, confidence is 0-1 float, all required fields present
+- Error handling: rate limits (429), authentication failures (401), timeouts, invalid JSON responses, missing fields, invalid phases
+- Graceful degradation: continues with ≥3 sources if some collectors fail (minimum 3 required for synthesis)
+- Errors tracked in "errors" field for transparency, never raises exceptions unless < 3 sources available
+- Test suite: 20 passing tests covering initialization, full analysis, per-source analysis, synthesis, error handling, edge cases, JSON serialization (C:\Users\Hp\Desktop\Gartner's Hype Cycle\backend\tests\test_deepseek_analyzer.py)
+- Real API validation: Successfully tested with "quantum computing" (all 5 sources classified as "peak", final confidence: 0.78, per-source confidence: 0.72-0.85)
 
 ### Frontend (Vanilla JS)
 
@@ -478,6 +497,48 @@ async def _get_relevant_identifiers(self, keyword: str, errors: List[str]) -> Li
 - Fallback strategy: Provide default identifiers (e.g., tech ETFs) when LLM fails
 - Cost consideration: Cache results per instance to minimize LLM API calls
 
+**10. Two-Stage LLM Analysis Pattern (DeepSeekAnalyzer Pattern)**
+- For complex classification tasks, use two-stage analysis: per-source analysis + final synthesis
+- Stage 1: Analyze each data source independently with specialized prompts (5 LLM calls for 5 sources)
+- Stage 2: Synthesize all per-source analyses into final classification (1 LLM call)
+- Pattern:
+```python
+async def analyze(self, keyword: str, collector_data: Dict[str, Any]) -> Dict[str, Any]:
+    errors = []
+    per_source_analyses = {}
+
+    # Stage 1: Analyze each source independently
+    for source_name in ["social", "papers", "patents", "news", "finance"]:
+        source_data = collector_data.get(source_name, {})
+        if not source_data:
+            errors.append(f"Missing {source_name} data")
+            continue
+
+        try:
+            # Use specialized prompt template for this source
+            analysis = await self._analyze_source(source_name, source_data, keyword)
+            per_source_analyses[source_name] = analysis
+        except Exception as e:
+            errors.append(f"Failed to analyze {source_name}: {str(e)}")
+
+    # Require minimum 3 sources for robust classification
+    if len(per_source_analyses) < 3:
+        raise Exception(f"Insufficient data for analysis. Errors: {errors}")
+
+    # Stage 2: Synthesize all source analyses into final classification
+    final_analysis = await self._synthesize_analyses(keyword, per_source_analyses)
+    final_analysis["per_source_analyses"] = per_source_analyses
+    if errors:
+        final_analysis["errors"] = errors
+    return final_analysis
+```
+- Benefits: Provides transparency (see individual source classifications), better reasoning (specialized prompts per source), graceful degradation (continues with ≥3 sources)
+- Specialized prompts: Each source gets domain-specific thresholds and interpretation guidance (e.g., social media: >200 mentions = peak, academic: <10 papers = innovation_trigger)
+- Synthesis prompt: Weighs all sources by confidence scores, handles conflicting signals (e.g., social hype vs. academic maturity)
+- Response validation: Strip markdown code blocks (```json ... ```), validate required fields, check value ranges
+- Temperature: Use 0.3 for deterministic classification (vs. 0.7+ for creative text generation)
+- Graceful degradation: Track errors in "errors" field, continue with partial data if ≥3 sources succeed
+
 ## Project Structure Reference
 
 ```
@@ -498,7 +559,7 @@ C:\Users\Hp\Desktop\Gartner's Hype Cycle\
 │   │   │   └── finance.py       # Financial data collector (IMPLEMENTED - Yahoo Finance + DeepSeek)
 │   │   ├── analyzers/
 │   │   │   ├── __init__.py
-│   │   │   └── deepseek.py      # DeepSeek LLM client (to be implemented)
+│   │   │   └── deepseek.py      # DeepSeek LLM client (IMPLEMENTED - 439 lines)
 │   │   ├── routers/
 │   │   │   ├── __init__.py
 │   │   │   ├── health.py        # Health check endpoint (implemented)
@@ -513,7 +574,8 @@ C:\Users\Hp\Desktop\Gartner's Hype Cycle\
 │   │   ├── test_papers_collector.py  # PapersCollector tests (18 tests)
 │   │   ├── test_patents_collector.py # PatentsCollector tests (20 tests)
 │   │   ├── test_news_collector.py    # NewsCollector tests (16 tests)
-│   │   └── test_finance_collector.py # FinanceCollector tests (17 tests)
+│   │   ├── test_finance_collector.py # FinanceCollector tests (17 tests)
+│   │   └── test_deepseek_analyzer.py # DeepSeekAnalyzer tests (20 tests)
 │   ├── venv/                    # Python virtual environment (gitignored)
 │   ├── requirements.txt         # Python dependencies
 │   ├── .env.example             # Environment variable template
@@ -572,10 +634,10 @@ Based on project setup completion, upcoming tasks will implement:
    - ✓ News aggregation (GDELT API) - COMPLETED
    - ✓ Financial data (Yahoo Finance with DeepSeek ticker discovery) - COMPLETED
 
-2. **DeepSeek Integration**:
-   - Prompt engineering for classification
-   - API client implementation
-   - JSON response parsing
+2. **DeepSeek Integration** (1 task, 1/1 complete):
+   - ✓ Prompt engineering for classification - COMPLETED
+   - ✓ API client implementation - COMPLETED
+   - ✓ JSON response parsing - COMPLETED
 
 3. **Analysis Endpoint**:
    - Cache checking logic
@@ -674,6 +736,20 @@ The FinanceCollector has comprehensive test coverage (17 tests):
 - Volume trend detection (increasing, stable, decreasing)
 - Instance isolation (thread-safe per-instance caching)
 - JSON serialization verification
+
+### DeepSeek Analyzer Test
+The DeepSeekAnalyzer has comprehensive test coverage (20 tests):
+- Initialization and API key validation (missing API key raises ValueError)
+- Full end-to-end analysis with all 5 data sources (6 total LLM calls: 5 per-source + 1 synthesis)
+- Individual per-source analysis for each collector (social, papers, patents, news, finance)
+- Final synthesis aggregation logic (weighs multiple source analyses)
+- Error handling (rate limits 429, authentication failures 401, timeouts, invalid JSON)
+- Invalid response handling (missing required fields, invalid phase values, confidence out of range)
+- Markdown stripping (handles ```json ... ``` code blocks from DeepSeek)
+- Edge cases (insufficient sources <3, partial collector failures, graceful degradation)
+- Response structure validation (phase in valid set, confidence 0-1, reasoning present)
+- JSON serialization verification (result is fully JSON-serializable)
+- Real API validation: Successfully tested with "quantum computing" (all 5 sources classified as "peak", final confidence: 0.78, per-source confidence: 0.72-0.85)
 
 ### API Documentation
 Access interactive Swagger UI at http://localhost:8000/api/docs to test endpoints directly in browser.
