@@ -21,7 +21,7 @@ The application follows a three-tier architecture:
 ### Request Flow
 
 1. User enters technology keyword in web interface (C:\Users\Hp\Desktop\Gartner's Hype Cycle\frontend\index.html)
-2. Frontend calls POST /api/analyze endpoint (C:\Users\Hp\Desktop\Gartner's Hype Cycle\backend\app\routers\analysis.py - to be implemented)
+2. Frontend calls POST /api/analyze endpoint (C:\Users\Hp\Desktop\Gartner's Hype Cycle\backend\app\routers\analysis.py)
 3. HypeCycleClassifier orchestrator receives request (C:\Users\Hp\Desktop\Gartner's Hype Cycle\backend\app\analyzers\hype_classifier.py)
 4. Orchestrator checks SQLite cache for recent analysis (WHERE keyword = ? AND expires_at > current_timestamp)
 5. On cache miss, five collectors run in parallel via asyncio.gather(return_exceptions=True) with 120s timeout:
@@ -44,8 +44,8 @@ The application follows a three-tier architecture:
 **Main Application** (C:\Users\Hp\Desktop\Gartner's Hype Cycle\backend\app\main.py)
 - FastAPI instance with CORS middleware for cross-origin requests
 - Startup event initializes database schema
-- Includes health router at /api prefix
-- Auto-generated API docs at /api/docs
+- Includes health router and analysis router at /api prefix
+- Auto-generated API docs at /api/docs and /api/redoc
 
 **Configuration** (C:\Users\Hp\Desktop\Gartner's Hype Cycle\backend\app\config.py)
 - Uses pydantic-settings for type-safe environment variable loading
@@ -65,6 +65,24 @@ The application follows a three-tier architecture:
 - GET /api/health endpoint
 - Tests database connectivity
 - Returns status: healthy/degraded, database: healthy/unhealthy, version: 0.1.0
+
+**Analysis Router** (C:\Users\Hp\Desktop\Gartner's Hype Cycle\backend\app\routers\analysis.py) - IMPLEMENTED
+- POST /api/analyze endpoint - main entry point for technology analysis
+- Request validation: Pydantic AnalyzeRequest model with keyword field (min_length=1, max_length=100, whitespace stripping)
+- Response structure: Pydantic AnalyzeResponse model matching HypeCycleClassifier output (13 fields total)
+- Integrates with HypeCycleClassifier via dependency injection pattern
+- Database connection: async aiosqlite.Connection via Depends(get_db)
+- Error handling:
+  - HTTP 422 Unprocessable Entity: Automatic validation errors (empty keyword, too long, invalid JSON) - handled by FastAPI/Pydantic
+  - HTTP 503 Service Unavailable: Insufficient data (<3 collectors succeeded) - temporary condition with detailed error message
+  - HTTP 500 Internal Server Error: Unexpected errors (database failures, DeepSeek API errors, etc.)
+- Performance characteristics:
+  - Fresh analysis: ~48 seconds (5 collectors + 6 DeepSeek LLM calls)
+  - Cache hit: <1 second (database query only)
+  - Cache TTL: 24 hours (configurable via CACHE_TTL_HOURS env var)
+- Comprehensive OpenAPI documentation with examples for all HTTP status codes (200, 422, 500, 503)
+- Logging: info level for successful analyses, warning for insufficient data, exception tracebacks for unexpected errors
+- Returns complete analysis with phase, confidence, reasoning, per-source analyses, collector data, metadata, and error tracking
 
 **Base Collector Interface** (C:\Users\Hp\Desktop\Gartner's Hype Cycle\backend\app\collectors\base.py)
 - Abstract base class defining collect(keyword) -> Dict[str, Any]
@@ -262,6 +280,7 @@ uvicorn app.main:app --reload
 # Server runs at: http://localhost:8000
 # API docs at: http://localhost:8000/api/docs
 # Health check: http://localhost:8000/api/health
+# Analysis endpoint: POST http://localhost:8000/api/analyze
 ```
 
 ### Opening Frontend
@@ -337,11 +356,66 @@ Key patterns from implemented collectors:
 4. Use Depends() for database connections and settings
 5. Include router in main.py with prefix and tags
 
-Example in main.py:
+Example from analysis.py implementation:
+```python
+from fastapi import APIRouter, Depends, HTTPException, status
+from pydantic import BaseModel, Field, field_validator
+from app.database import get_db
+from app.analyzers.hype_classifier import HypeCycleClassifier
+import aiosqlite
+
+router = APIRouter()
+
+class AnalyzeRequest(BaseModel):
+    keyword: str = Field(
+        ...,  # Required
+        min_length=1,
+        max_length=100,
+        description="Technology keyword to analyze",
+        examples=["quantum computing", "blockchain"]
+    )
+
+    @field_validator('keyword')
+    @classmethod
+    def strip_keyword(cls, v: str) -> str:
+        return v.strip()
+
+class AnalyzeResponse(BaseModel):
+    keyword: str
+    phase: str
+    confidence: float = Field(ge=0.0, le=1.0)
+    reasoning: str
+    # ... additional fields ...
+
+@router.post("/analyze", response_model=AnalyzeResponse, status_code=status.HTTP_200_OK)
+async def analyze_technology(
+    request: AnalyzeRequest,
+    db: aiosqlite.Connection = Depends(get_db)
+) -> AnalyzeResponse:
+    try:
+        classifier = HypeCycleClassifier()
+        result = await classifier.classify(request.keyword, db)
+        return result
+    except Exception as e:
+        if "Insufficient data" in str(e):
+            raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(e))
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Analysis failed: {str(e)}")
+```
+
+Register in main.py:
 ```python
 from app.routers import health, analysis
+app.include_router(health.router, prefix="/api", tags=["health"])
 app.include_router(analysis.router, prefix="/api", tags=["analysis"])
 ```
+
+Key patterns:
+- Use Pydantic models for request/response validation and automatic OpenAPI schema generation
+- Order parameters: request body first, then dependencies (ensures validation happens before DB connection)
+- Use field_validator for custom validation (e.g., whitespace stripping)
+- Use Field() constraints (min_length, max_length, ge, le) for automatic validation
+- Map exception types to appropriate HTTP status codes (503 for temporary failures, 500 for unexpected errors)
+- Include comprehensive OpenAPI documentation with examples in responses parameter
 
 ### Database Operations
 
@@ -368,38 +442,44 @@ api_key = settings.deepseek_api_key
 
 ### Using the Orchestration Layer
 
-The HypeCycleClassifier is the main entry point for analysis. Typical usage in a FastAPI router:
+The HypeCycleClassifier is the main entry point for analysis. See the implemented analysis router for production usage pattern:
 
 ```python
+# See C:\Users\Hp\Desktop\Gartner's Hype Cycle\backend\app\routers\analysis.py for full implementation
 from app.analyzers.hype_classifier import HypeCycleClassifier
 from app.database import get_db
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, status
+from pydantic import BaseModel, Field
 import aiosqlite
 
 router = APIRouter()
 
+class AnalyzeRequest(BaseModel):
+    keyword: str = Field(min_length=1, max_length=100)
+
 @router.post("/analyze")
 async def analyze_technology(
-    keyword: str,
+    request: AnalyzeRequest,
     db: aiosqlite.Connection = Depends(get_db)
 ):
     try:
         classifier = HypeCycleClassifier()
-        result = await classifier.classify(keyword, db)
+        result = await classifier.classify(request.keyword, db)
         return result
     except Exception as e:
         if "Insufficient data" in str(e):
-            raise HTTPException(status_code=503, detail=str(e))
-        raise HTTPException(status_code=500, detail=str(e))
+            raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(e))
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Analysis failed: {str(e)}")
 ```
 
 Key behaviors:
-- Returns cached result immediately if found (cache_hit=True)
-- Runs all 5 collectors in parallel on cache miss (120s timeout)
+- Returns cached result immediately if found (cache_hit=True, <1 second response time)
+- Runs all 5 collectors in parallel on cache miss (120s timeout, ~48 seconds typical)
 - Requires minimum 3 of 5 collectors to succeed
 - Raises exception if <3 collectors succeed (handle with 503 Service Unavailable)
-- Response includes per-source analyses, collector data, metadata, and error tracking
-- Automatically persists result to database with 24-hour cache TTL
+- Response includes per-source analyses, collector data, metadata, and error tracking (13 total fields)
+- Automatically persists result to database with 24-hour cache TTL (configurable via CACHE_TTL_HOURS)
+- Comprehensive error aggregation: tracks which collectors/analysis steps failed with descriptive messages
 
 ### Critical API Integration Patterns
 
@@ -629,8 +709,8 @@ C:\Users\Hp\Desktop\Gartner's Hype Cycle\
 │   │   │   └── hype_classifier.py # Main orchestration layer (IMPLEMENTED - 290 lines)
 │   │   ├── routers/
 │   │   │   ├── __init__.py
-│   │   │   ├── health.py        # Health check endpoint (implemented)
-│   │   │   └── analysis.py      # Main analysis endpoint (to be implemented)
+│   │   │   ├── health.py        # Health check endpoint (IMPLEMENTED)
+│   │   │   └── analysis.py      # Main analysis endpoint (IMPLEMENTED - 183 lines)
 │   │   ├── models/              # Database models or schemas (placeholder)
 │   │   │   └── __init__.py
 │   │   └── utils/               # Shared utilities (placeholder)
@@ -694,7 +774,7 @@ Before running collectors, check database for recent analysis of same keyword wh
 
 ## Next Development Steps
 
-Based on project setup completion, upcoming tasks will implement:
+Based on project implementation status:
 
 1. **Individual Collectors** (5 tasks, 5/5 complete):
    - ✓ Social media (Hacker News Algolia API) - COMPLETED
@@ -717,17 +797,20 @@ Based on project setup completion, upcoming tasks will implement:
    - ✓ Graceful degradation (minimum 3 of 5 collectors) - COMPLETED
    - ✓ Comprehensive test suite (12 tests) - COMPLETED
 
-4. **Analysis Endpoint** (next task):
-   - FastAPI router integration (backend/app/routers/analysis.py)
-   - POST /api/analyze endpoint with request/response models
-   - HypeCycleClassifier invocation with database dependency injection
-   - Error handling and HTTP status codes
-   - OpenAPI documentation
+4. **Analysis Endpoint** (1 task, 1/1 complete):
+   - ✓ FastAPI router integration (backend/app/routers/analysis.py) - COMPLETED
+   - ✓ POST /api/analyze endpoint with request/response models - COMPLETED
+   - ✓ HypeCycleClassifier invocation with database dependency injection - COMPLETED
+   - ✓ Error handling and HTTP status codes (200, 422, 500, 503) - COMPLETED
+   - ✓ OpenAPI documentation with examples - COMPLETED
+   - ✓ Request validation (min_length, max_length, whitespace stripping) - COMPLETED
+   - ✓ Performance tested (48s fresh, <1s cache hit) - COMPLETED
 
-5. **Frontend Enhancement**:
+5. **Frontend Enhancement** (upcoming tasks):
    - Improve hype cycle curve visualization
    - Add interactive tooltips
    - Display collector data details
+   - Show per-source analyses breakdown
 
 ## Testing
 
@@ -846,8 +929,59 @@ The HypeCycleClassifier has comprehensive test coverage (12 tests):
 - JSON serialization of final result
 - Integration test: backend/test_real_classification.py validates end-to-end workflow with real API calls to all 5 collectors + DeepSeek
 
+### Analysis Endpoint Test
+Manual testing results for POST /api/analyze endpoint:
+- Fresh analysis ("blockchain"): 48 seconds response time, HTTP 200, phase: "trough", confidence: 0.78, all 5 collectors succeeded
+- Cache hit (repeated "blockchain"): <1 second response time, HTTP 200, cache_hit: true, identical results
+- Validation error (empty keyword): HTTP 422 Unprocessable Entity, automatic FastAPI/Pydantic validation
+- Comprehensive response structure: 13 fields including keyword, phase, confidence, reasoning, per_source_analyses, collector_data, metadata, error tracking
+- DeepSeek execution: 6 total LLM API calls (5 per-source analyses + 1 final synthesis) as expected
+- Graceful degradation: Semantic Scholar returned HTTP 429 rate limit during test, but remaining collectors succeeded (5/5 overall)
+- Cache behavior: Response includes expires_at timestamp (24 hours from created_at), cache_hit boolean toggles correctly
+
 ### API Documentation
 Access interactive Swagger UI at http://localhost:8000/api/docs to test endpoints directly in browser.
+
+#### Available Endpoints
+- GET /api/health - Health check endpoint
+- POST /api/analyze - Technology analysis endpoint with comprehensive OpenAPI documentation
+- GET /api/docs - Swagger UI interactive documentation
+- GET /api/redoc - ReDoc alternative documentation interface
+
+#### Testing POST /api/analyze via Swagger UI
+1. Navigate to http://localhost:8000/api/docs
+2. Expand POST /api/analyze endpoint
+3. Click "Try it out"
+4. Enter keyword in request body: `{"keyword": "quantum computing"}`
+5. Click "Execute"
+6. View response with complete analysis results (phase, confidence, reasoning, collector data, etc.)
+
+#### Testing POST /api/analyze via curl
+```bash
+# Fresh analysis
+curl -X POST http://localhost:8000/api/analyze \
+  -H "Content-Type: application/json" \
+  -d '{"keyword": "blockchain"}'
+
+# Response (abbreviated):
+{
+  "keyword": "blockchain",
+  "phase": "trough",
+  "confidence": 0.78,
+  "reasoning": "...",
+  "cache_hit": false,
+  "collectors_succeeded": 5,
+  "partial_data": false,
+  "errors": []
+}
+
+# Cache hit (repeat same keyword within 24 hours)
+curl -X POST http://localhost:8000/api/analyze \
+  -H "Content-Type: application/json" \
+  -d '{"keyword": "blockchain"}'
+
+# Response includes cache_hit: true, completes in <1 second
+```
 
 ## Common Issues
 

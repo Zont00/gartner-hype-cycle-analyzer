@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from app.routers import health
+from app.routers import health, analysis
 from app.database import init_db
 import logging
 
@@ -41,6 +41,7 @@ async def shutdown_event():
 
 # Include routers
 app.include_router(health.router, prefix="/api", tags=["health"])
+app.include_router(analysis.router, prefix="/api", tags=["analysis"])
 
 # Root endpoint
 @app.get("/")
