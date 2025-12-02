@@ -156,3 +156,202 @@ h1 {
 .hidden {
     display: none;
 }
+
+/* Loading note */
+.loading-note {
+    color: #6b7280;
+    font-size: 0.9rem;
+    margin-top: 10px;
+}
+
+/* Status indicators */
+.status-indicators {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin-bottom: 20px;
+}
+
+.status-badge {
+    display: inline-block;
+    padding: 6px 12px;
+    border-radius: 6px;
+    font-size: 0.875rem;
+    font-weight: 500;
+}
+
+.status-cache {
+    background: #dbeafe;
+    color: #1e40af;
+}
+
+.status-fresh {
+    background: #dcfce7;
+    color: #15803d;
+}
+
+.status-collectors {
+    background: #f3e8ff;
+    color: #7c3aed;
+}
+
+.status-expiry {
+    background: #fef3c7;
+    color: #92400e;
+}
+
+/* Warning banner */
+.warning-banner {
+    background: #fef3c7;
+    border-left: 4px solid #f59e0b;
+    color: #92400e;
+    padding: 15px 20px;
+    border-radius: 8px;
+    margin-bottom: 20px;
+}
+
+.warning-banner strong {
+    font-weight: 600;
+}
+
+/* Per-source analyses section */
+.per-source-section {
+    margin-top: 30px;
+}
+
+.per-source-section h3 {
+    color: #1f2937;
+    font-size: 1.25rem;
+    margin-bottom: 10px;
+}
+
+.per-source-description {
+    color: #6b7280;
+    font-size: 0.9rem;
+    margin-bottom: 20px;
+}
+
+.per-source-breakdowns {
+    display: flex;
+    flex-direction: column;
+    gap: 15px;
+}
+
+/* Source cards */
+.source-card {
+    background: #f9fafb;
+    border: 1px solid #e5e7eb;
+    border-radius: 8px;
+    padding: 20px;
+    transition: box-shadow 0.3s;
+}
+
+.source-card:hover {
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+}
+
+.source-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 15px;
+    flex-wrap: wrap;
+}
+
+.source-name {
+    font-weight: 600;
+    color: #1f2937;
+    font-size: 1rem;
+    flex: 1;
+    min-width: 200px;
+}
+
+/* Phase badges */
+.phase-badge {
+    display: inline-block;
+    padding: 4px 10px;
+    border-radius: 4px;
+    font-size: 0.875rem;
+    font-weight: 500;
+    color: white;
+}
+
+.phase-innovation_trigger {
+    background: #3b82f6;
+}
+
+.phase-peak {
+    background: #ef4444;
+}
+
+.phase-trough {
+    background: #f97316;
+}
+
+.phase-slope {
+    background: #eab308;
+    color: #1f2937;
+}
+
+.phase-plateau {
+    background: #22c55e;
+}
+
+/* Confidence badges */
+.confidence-badge {
+    display: inline-block;
+    padding: 4px 10px;
+    border-radius: 4px;
+    font-size: 0.875rem;
+    font-weight: 600;
+}
+
+.confidence-high {
+    background: #dcfce7;
+    color: #15803d;
+}
+
+.confidence-medium {
+    background: #fef3c7;
+    color: #92400e;
+}
+
+.confidence-low {
+    background: #fee2e2;
+    color: #991b1b;
+}
+
+/* Source reasoning */
+.source-reasoning {
+    color: #4b5563;
+    font-size: 0.95rem;
+    line-height: 1.6;
+}
+
+.no-data {
+    color: #9ca3af;
+    font-style: italic;
+    text-align: center;
+    padding: 20px;
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+    .source-header {
+        flex-direction: column;
+        align-items: flex-start;
+    }
+
+    .source-name {
+        width: 100%;
+        min-width: unset;
+    }
+
+    .status-indicators {
+        flex-direction: column;
+    }
+
+    .status-badge {
+        width: 100%;
+    }
+}
