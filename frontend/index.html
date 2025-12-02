@@ -24,10 +24,20 @@
         <div id="loading" class="hidden">
             <div class="spinner"></div>
             <p>Analyzing technology...</p>
+            <p class="loading-note">This may take up to 2 minutes for fresh analysis</p>
         </div>
 
         <div id="results" class="hidden">
             <h2>Results for: <span id="result-keyword"></span></h2>
+
+            <!-- Status indicators -->
+            <div id="status-indicators" class="status-indicators"></div>
+
+            <!-- Warning banner for partial data -->
+            <div id="partial-data-warning" class="warning-banner hidden">
+                <strong>⚠ Partial Data:</strong> <span id="partial-data-message"></span>
+            </div>
+
             <div class="hype-cycle-viz">
                 <canvas id="hype-cycle-canvas" width="800" height="400"></canvas>
             </div>
@@ -41,6 +51,13 @@
                 <div class="detail-item">
                     <strong>Reasoning:</strong> <span id="reasoning"></span>
                 </div>
+            </div>
+
+            <!-- Per-source analyses breakdown -->
+            <div class="per-source-section">
+                <h3>Per-Source Analyses</h3>
+                <p class="per-source-description">Individual classifications from each data source:</p>
+                <div id="per-source-breakdowns" class="per-source-breakdowns"></div>
             </div>
         </div>
 
