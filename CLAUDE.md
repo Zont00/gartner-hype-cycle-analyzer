@@ -22,16 +22,20 @@ The application follows a three-tier architecture:
 
 1. User enters technology keyword in web interface (C:\Users\Hp\Desktop\Gartner's Hype Cycle\frontend\index.html)
 2. Frontend calls POST /api/analyze endpoint (C:\Users\Hp\Desktop\Gartner's Hype Cycle\backend\app\routers\analysis.py - to be implemented)
-3. Backend checks SQLite cache for recent analysis
-4. On cache miss, five collectors run in parallel:
+3. HypeCycleClassifier orchestrator receives request (C:\Users\Hp\Desktop\Gartner's Hype Cycle\backend\app\analyzers\hype_classifier.py)
+4. Orchestrator checks SQLite cache for recent analysis (WHERE keyword = ? AND expires_at > current_timestamp)
+5. On cache miss, five collectors run in parallel via asyncio.gather(return_exceptions=True) with 120s timeout:
    - Social Media Collector (C:\Users\Hp\Desktop\Gartner's Hype Cycle\backend\app\collectors\social.py) - IMPLEMENTED
    - Research Papers Collector (C:\Users\Hp\Desktop\Gartner's Hype Cycle\backend\app\collectors\papers.py) - IMPLEMENTED
    - Patent Collector (C:\Users\Hp\Desktop\Gartner's Hype Cycle\backend\app\collectors\patents.py) - IMPLEMENTED
    - News Collector (C:\Users\Hp\Desktop\Gartner's Hype Cycle\backend\app\collectors\news.py) - IMPLEMENTED
    - Financial Data Collector (C:\Users\Hp\Desktop\Gartner's Hype Cycle\backend\app\collectors\finance.py) - IMPLEMENTED
-5. DeepSeek analyzer classifies technology into hype cycle phase (C:\Users\Hp\Desktop\Gartner's Hype Cycle\backend\app\analyzers\deepseek.py)
-6. Result cached in database and returned to frontend
-7. Frontend renders position on hype cycle curve
+6. Orchestrator validates minimum 3 of 5 collectors succeeded (graceful degradation)
+7. DeepSeek analyzer performs two-stage classification: 5 per-source analyses + 1 final synthesis (C:\Users\Hp\Desktop\Gartner's Hype Cycle\backend\app\analyzers\deepseek.py)
+8. Orchestrator persists result to database with 24-hour cache TTL, JSON-serialized collector data
+9. Comprehensive response assembled with phase, confidence, reasoning, per-source analyses, collector data, metadata, and errors
+10. Result returned to frontend
+11. Frontend renders position on hype cycle curve
 
 ## Key Components
 
@@ -181,6 +185,33 @@ The application follows a three-tier architecture:
 - Errors tracked in "errors" field for transparency, never raises exceptions unless < 3 sources available
 - Test suite: 20 passing tests covering initialization, full analysis, per-source analysis, synthesis, error handling, edge cases, JSON serialization (C:\Users\Hp\Desktop\Gartner's Hype Cycle\backend\tests\test_deepseek_analyzer.py)
 - Real API validation: Successfully tested with "quantum computing" (all 5 sources classified as "peak", final confidence: 0.78, per-source confidence: 0.72-0.85)
+
+**Hype Cycle Classifier** (C:\Users\Hp\Desktop\Gartner's Hype Cycle\backend\app\analyzers\hype_classifier.py) - IMPLEMENTED
+- Main orchestration layer that coordinates the entire analysis workflow
+- Class constants: MINIMUM_SOURCES_REQUIRED = 3, COLLECTOR_TIMEOUT_SECONDS = 120.0
+- classify(keyword, db) is the main entry point, returns comprehensive analysis dict
+- Cache-first strategy: queries database for existing analysis (WHERE keyword = ? AND expires_at > current_timestamp)
+- Returns cached result immediately on cache hit, avoiding all collector/LLM API calls
+- Parallel collector execution: instantiates all 5 collectors, runs collect() in parallel via asyncio.gather(return_exceptions=True)
+- 120-second timeout for entire collector execution batch (asyncio.wait_for wrapper)
+- Graceful degradation: continues with partial data if ≥3 of 5 collectors succeed
+- Raises exception if <3 collectors succeed: "Insufficient data: only X/5 collectors succeeded"
+- Error aggregation: tracks which collectors failed with descriptive error messages
+- DeepSeek integration: passes collector_results dict to analyzer.analyze() for two-stage classification
+- Database persistence: serializes collector data to JSON strings for storage in TEXT columns (social_data, papers_data, etc.)
+- Cache TTL: expires_at = created_at + timedelta(hours=settings.cache_ttl_hours) (default 24 hours)
+- Comprehensive response structure:
+  - Core classification: keyword, phase, confidence, reasoning
+  - Per-source breakdowns: per_source_analyses dict from DeepSeek (5 individual classifications)
+  - Raw collector data: collector_data dict for transparency and debugging
+  - Metadata: timestamp, cache_hit boolean, expires_at timestamp
+  - Error tracking: collectors_succeeded count, partial_data boolean, errors list
+- Logging: cache hit/miss, collector completion count, individual collector failures
+- Database operations: async context managers for cursor management (async with db.execute())
+- Settings access: uses get_settings() cached singleton for configuration
+- Test suite: 12 passing tests covering initialization, cache hit/miss, partial success (3/5, 4/5 collectors), insufficient data (<3 collectors), error handling, JSON serialization (C:\Users\Hp\Desktop\Gartner's Hype Cycle\backend\tests\test_hype_classifier.py)
+- Integration test: backend/test_real_classification.py validates end-to-end workflow with real API calls
+- CRITICAL pattern: return_exceptions=True in asyncio.gather prevents one collector failure from cancelling others
 
 ### Frontend (Vanilla JS)
 
@@ -334,6 +365,41 @@ from app.config import get_settings
 settings = get_settings()
 api_key = settings.deepseek_api_key
 ```
+
+### Using the Orchestration Layer
+
+The HypeCycleClassifier is the main entry point for analysis. Typical usage in a FastAPI router:
+
+```python
+from app.analyzers.hype_classifier import HypeCycleClassifier
+from app.database import get_db
+from fastapi import APIRouter, Depends, HTTPException
+import aiosqlite
+
+router = APIRouter()
+
+@router.post("/analyze")
+async def analyze_technology(
+    keyword: str,
+    db: aiosqlite.Connection = Depends(get_db)
+):
+    try:
+        classifier = HypeCycleClassifier()
+        result = await classifier.classify(keyword, db)
+        return result
+    except Exception as e:
+        if "Insufficient data" in str(e):
+            raise HTTPException(status_code=503, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e))
+```
+
+Key behaviors:
+- Returns cached result immediately if found (cache_hit=True)
+- Runs all 5 collectors in parallel on cache miss (120s timeout)
+- Requires minimum 3 of 5 collectors to succeed
+- Raises exception if <3 collectors succeed (handle with 503 Service Unavailable)
+- Response includes per-source analyses, collector data, metadata, and error tracking
+- Automatically persists result to database with 24-hour cache TTL
 
 ### Critical API Integration Patterns
 
@@ -559,7 +625,8 @@ C:\Users\Hp\Desktop\Gartner's Hype Cycle\
 │   │   │   └── finance.py       # Financial data collector (IMPLEMENTED - Yahoo Finance + DeepSeek)
 │   │   ├── analyzers/
 │   │   │   ├── __init__.py
-│   │   │   └── deepseek.py      # DeepSeek LLM client (IMPLEMENTED - 439 lines)
+│   │   │   ├── deepseek.py      # DeepSeek LLM client (IMPLEMENTED - 439 lines)
+│   │   │   └── hype_classifier.py # Main orchestration layer (IMPLEMENTED - 290 lines)
 │   │   ├── routers/
 │   │   │   ├── __init__.py
 │   │   │   ├── health.py        # Health check endpoint (implemented)
@@ -575,7 +642,9 @@ C:\Users\Hp\Desktop\Gartner's Hype Cycle\
 │   │   ├── test_patents_collector.py # PatentsCollector tests (20 tests)
 │   │   ├── test_news_collector.py    # NewsCollector tests (16 tests)
 │   │   ├── test_finance_collector.py # FinanceCollector tests (17 tests)
-│   │   └── test_deepseek_analyzer.py # DeepSeekAnalyzer tests (20 tests)
+│   │   ├── test_deepseek_analyzer.py # DeepSeekAnalyzer tests (20 tests)
+│   │   └── test_hype_classifier.py   # HypeCycleClassifier tests (12 tests)
+│   ├── test_real_classification.py  # Integration test for end-to-end workflow
 │   ├── venv/                    # Python virtual environment (gitignored)
 │   ├── requirements.txt         # Python dependencies
 │   ├── .env.example             # Environment variable template
@@ -639,13 +708,23 @@ Based on project setup completion, upcoming tasks will implement:
    - ✓ API client implementation - COMPLETED
    - ✓ JSON response parsing - COMPLETED
 
-3. **Analysis Endpoint**:
-   - Cache checking logic
-   - Parallel collector execution with asyncio.gather()
-   - LLM orchestration
-   - Result persistence
+3. **Orchestration Layer** (1 task, 1/1 complete):
+   - ✓ HypeCycleClassifier implementation - COMPLETED
+   - ✓ Cache checking logic - COMPLETED
+   - ✓ Parallel collector execution with asyncio.gather() - COMPLETED
+   - ✓ DeepSeek integration - COMPLETED
+   - ✓ Result persistence - COMPLETED
+   - ✓ Graceful degradation (minimum 3 of 5 collectors) - COMPLETED
+   - ✓ Comprehensive test suite (12 tests) - COMPLETED
 
-4. **Frontend Enhancement**:
+4. **Analysis Endpoint** (next task):
+   - FastAPI router integration (backend/app/routers/analysis.py)
+   - POST /api/analyze endpoint with request/response models
+   - HypeCycleClassifier invocation with database dependency injection
+   - Error handling and HTTP status codes
+   - OpenAPI documentation
+
+5. **Frontend Enhancement**:
    - Improve hype cycle curve visualization
    - Add interactive tooltips
    - Display collector data details
@@ -750,6 +829,22 @@ The DeepSeekAnalyzer has comprehensive test coverage (20 tests):
 - Response structure validation (phase in valid set, confidence 0-1, reasoning present)
 - JSON serialization verification (result is fully JSON-serializable)
 - Real API validation: Successfully tested with "quantum computing" (all 5 sources classified as "peak", final confidence: 0.78, per-source confidence: 0.72-0.85)
+
+### Hype Cycle Classifier Test
+The HypeCycleClassifier has comprehensive test coverage (12 tests):
+- Initialization with settings injection
+- Cache hit scenario (returns cached result without running collectors)
+- Cache miss with all 5 collectors succeeding (full analysis workflow)
+- Partial success scenarios (3/5 and 4/5 collectors succeed at minimum threshold)
+- Insufficient data error (<3 collectors succeed raises exception)
+- Parallel collector execution (_run_collectors method with all successes)
+- Parallel collector execution with partial failures (2/5 collectors fail)
+- Database persistence (_persist_result writes correctly to database)
+- Response assembly with full data (all collectors succeed)
+- Response assembly with partial data (some collectors failed)
+- Response assembly combines collector and analysis errors
+- JSON serialization of final result
+- Integration test: backend/test_real_classification.py validates end-to-end workflow with real API calls to all 5 collectors + DeepSeek
 
 ### API Documentation
 Access interactive Swagger UI at http://localhost:8000/api/docs to test endpoints directly in browser.

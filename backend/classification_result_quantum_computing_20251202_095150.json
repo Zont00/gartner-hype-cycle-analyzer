@@ -1,0 +1,439 @@
+{
+  "keyword": "quantum computing",
+  "phase": "trough",
+  "confidence": 0.74,
+  "reasoning": "The most current and sentiment-driven indicators (Social Media and News Coverage) both strongly point to the Trough of Disillusionment, with negative sentiment and stable but pessimistic coverage. While patents show peak-like investment and academic research indicates maturing progress, these are slower, foundational signals that precede broader market sentiment. Financial markets show early signs of stabilization, but the dominant narrative from recent public and media discourse confirms the technology is currently in a phase of disillusionment following inflated expectations.",
+  "timestamp": "2025-12-02T09:51:50.431227",
+  "cache_hit": false,
+  "expires_at": "2025-12-03T09:51:50.431227",
+  "per_source_analyses": {
+    "social": {
+      "phase": "trough",
+      "confidence": 0.7,
+      "reasoning": "Mentions are low and recency is low despite an increasing trend, sentiment is negative (-0.44), and engagement is modest, which aligns with the Trough of Disillusionment where interest has declined from a peak and sentiment has turned negative."
+    },
+    "papers": {
+      "phase": "slope",
+      "confidence": 0.8,
+      "reasoning": "The field is marked as mature with accelerating momentum and a high volume of publications, indicating steady growth beyond the initial hype peak, yet the negative citation velocity suggests it is past the peak and entering a phase of more sustainable, practical development."
+    },
+    "patents": {
+      "phase": "peak",
+      "confidence": 0.78,
+      "reasoning": "The data shows explosive growth in filings (2y=397, 5y=439), accelerating velocity (1.26), high unique assignee count (84), and global diversity (16 countries), which are all strong indicators of the Peak of Inflated Expectations."
+    },
+    "news": {
+      "phase": "trough",
+      "confidence": 0.68,
+      "reasoning": "The data shows a stable but high volume of coverage paired with a negative average tone and a negative sentiment trend, which aligns with the Trough of Disillusionment where media attention remains but sentiment has turned pessimistic."
+    },
+    "finance": {
+      "phase": "slope",
+      "confidence": 0.76,
+      "reasoning": "The data shows stabilizing metrics (stable volume, low volatility), positive but decelerating investor momentum, and a developing market maturity, which aligns with the Slope of Enlightenment where practical applications emerge and sentiment improves from trough lows."
+    }
+  },
+  "collector_data": {
+    "social": {
+      "source": "hacker_news",
+      "collected_at": "2025-12-02T09:51:00.755991",
+      "keyword": "quantum computing",
+      "mentions_30d": 35,
+      "mentions_6m": 114,
+      "mentions_1y": 152,
+      "mentions_total": 301,
+      "avg_points_30d": 2.9,
+      "avg_comments_30d": 0.55,
+      "avg_points_6m": 11.65,
+      "avg_comments_6m": 3.55,
+      "sentiment": -0.439,
+      "recency": "low",
+      "growth_trend": "increasing",
+      "momentum": "accelerating",
+      "top_stories": [
+        {
+          "title": "Quantum computing: too much to handle",
+          "points": 8,
+          "comments": 0,
+          "age_days": 17
+        },
+        {
+          "title": "Quantum Computing: Hype or Hope?",
+          "points": 7,
+          "comments": 1,
+          "age_days": 26
+        },
+        {
+          "title": "Python library for quantum computing, quantum ML, and quantum chemistry",
+          "points": 6,
+          "comments": 0,
+          "age_days": 26
+        },
+        {
+          "title": "Quantum computing: too much to handle",
+          "points": 4,
+          "comments": 4,
+          "age_days": 11
+        },
+        {
+          "title": "Quantum computing tech keeps edging forward",
+          "points": 4,
+          "comments": 1,
+          "age_days": 15
+        }
+      ],
+      "errors": []
+    },
+    "papers": {
+      "source": "semantic_scholar",
+      "collected_at": "2025-12-02T09:51:01.102292",
+      "keyword": "quantum computing",
+      "publications_2y": 8106,
+      "publications_5y": 6612,
+      "publications_total": 14718,
+      "avg_citations_2y": 6.13,
+      "avg_citations_5y": 19.14,
+      "avg_influential_citations_2y": 0.25,
+      "avg_influential_citations_5y": 0.76,
+      "citation_velocity": -0.68,
+      "author_diversity": 3919,
+      "venue_diversity": 413,
+      "research_maturity": "mature",
+      "research_momentum": "accelerating",
+      "research_trend": "increasing",
+      "research_breadth": "narrow",
+      "top_papers": [
+        {
+          "title": "Barren plateaus in variational quantum computing",
+          "year": 2024,
+          "citations": 282,
+          "influential_citations": 10,
+          "authors": 10,
+          "venue": "Nature Reviews Physics"
+        },
+        {
+          "title": "Quantum Computing for High-Energy Physics: State of the Art and Challenges",
+          "year": 2023,
+          "citations": 216,
+          "influential_citations": 2,
+          "authors": 46,
+          "venue": "PRX Quantum"
+        },
+        {
+          "title": "Applications of single photons to quantum communication and computing",
+          "year": 2023,
+          "citations": 159,
+          "influential_citations": 2,
+          "authors": 9,
+          "venue": "Nature Reviews Physics"
+        },
+        {
+          "title": "Quantum many-body simulations on digital quantum computers: State-of-the-art and future challenges",
+          "year": 2024,
+          "citations": 131,
+          "influential_citations": 0,
+          "authors": 1,
+          "venue": "Nature Communications"
+        },
+        {
+          "title": "Distributed quantum computing across an optical network link",
+          "year": 2024,
+          "citations": 123,
+          "influential_citations": 8,
+          "authors": 9,
+          "venue": "Nature"
+        }
+      ],
+      "errors": []
+    },
+    "patents": {
+      "source": "patentsview",
+      "collected_at": "2025-12-02T09:51:01.326122",
+      "keyword": "quantum computing",
+      "patents_2y": 397,
+      "patents_5y": 439,
+      "patents_10y": 53,
+      "patents_total": 889,
+      "unique_assignees": 84,
+      "top_assignees": [
+        {
+          "name": "International Business Machines Corporation",
+          "patent_count": 37
+        },
+        {
+          "name": "Microsoft Technology Licensing, LLC",
+          "patent_count": 18
+        },
+        {
+          "name": "Rigetti & Co, LLC",
+          "patent_count": 18
+        },
+        {
+          "name": "Intel Corporation",
+          "patent_count": 17
+        },
+        {
+          "name": "Google LLC",
+          "patent_count": 12
+        }
+      ],
+      "countries": {
+        "US": 195,
+        "IN": 1,
+        "TW": 1,
+        "DE": 2,
+        "CA": 21,
+        "IE": 7,
+        "ES": 1,
+        "JP": 10,
+        "KY": 1,
+        "DK": 1,
+        "BY": 1,
+        "PK": 1,
+        "IT": 1,
+        "KR": 3,
+        "CN": 3,
+        "AU": 1
+      },
+      "geographic_diversity": 16,
+      "avg_citations_2y": 0.76,
+      "avg_citations_5y": 13.51,
+      "filing_velocity": 1.261,
+      "assignee_concentration": "diverse",
+      "geographic_reach": "regional",
+      "patent_maturity": "mature",
+      "patent_momentum": "accelerating",
+      "patent_trend": "increasing",
+      "top_patents": [
+        {
+          "patent_number": "10572684",
+          "title": "Systems and methods for enforcing centralized privacy controls in de-centralized systems",
+          "date": "2020-02-25",
+          "assignee": "Anonos Inc.",
+          "country": "US",
+          "citations": 281
+        },
+        {
+          "patent_number": "9049010",
+          "title": "Portable data encryption device with configurable security functionality and method for file encryption",
+          "date": "2015-06-02",
+          "assignee": "SPYRUS, INC.",
+          "country": "US",
+          "citations": 207
+        },
+        {
+          "patent_number": "10127499",
+          "title": "Operating a quantum processor in a heterogeneous computing architecture",
+          "date": "2018-11-13",
+          "assignee": "Rigetti & Co, LLC",
+          "country": "US",
+          "citations": 79
+        },
+        {
+          "patent_number": "10192168",
+          "title": "Processing signals in a quantum computing system",
+          "date": "2019-01-29",
+          "assignee": "Rigetti & Co, LLC",
+          "country": "US",
+          "citations": 79
+        },
+        {
+          "patent_number": "9836699",
+          "title": "Microwave integrated quantum circuits with interposer",
+          "date": "2017-12-05",
+          "assignee": "Rigetti & Co, LLC",
+          "country": "US",
+          "citations": 78
+        }
+      ],
+      "errors": []
+    },
+    "news": {
+      "source": "gdelt",
+      "collected_at": "2025-12-02T09:51:01.542693",
+      "keyword": "quantum computing",
+      "articles_30d": 250,
+      "articles_3m": 250,
+      "articles_1y": 250,
+      "articles_total": 750,
+      "source_countries": {
+        "United States": 614,
+        "Qatar": 4,
+        "China": 7,
+        "United Kingdom": 6,
+        "Germany": 12,
+        "Thailand": 1,
+        "India": 39,
+        "": 12,
+        "Philippines": 11,
+        "Russia": 10,
+        "Hong Kong": 4,
+        "Syria": 2,
+        "Australia": 2,
+        "Ireland": 1,
+        "Canada": 6,
+        "Egypt": 3,
+        "Israel": 2,
+        "Kenya": 1,
+        "South Africa": 3,
+        "Saudi Arabia": 1,
+        "Oman": 1,
+        "Singapore": 1,
+        "Japan": 3,
+        "South Korea": 1,
+        "Malta": 1,
+        "Bolivia": 1,
+        "France": 1
+      },
+      "geographic_diversity": 27,
+      "unique_domains": 137,
+      "top_domains": [
+        {
+          "domain": "fool.com",
+          "count": 245
+        },
+        {
+          "domain": "finance.yahoo.com",
+          "count": 145
+        },
+        {
+          "domain": "insidermonkey.com",
+          "count": 31
+        },
+        {
+          "domain": "investors.com",
+          "count": 18
+        },
+        {
+          "domain": "benzinga.com",
+          "count": 18
+        }
+      ],
+      "avg_tone": -0.773,
+      "tone_distribution": {
+        "positive": 41,
+        "neutral": 223,
+        "negative": 1438
+      },
+      "volume_intensity_30d": 0.033,
+      "volume_intensity_3m": 0.036,
+      "volume_intensity_1y": 0.027,
+      "media_attention": "high",
+      "coverage_trend": "stable",
+      "sentiment_trend": "negative",
+      "mainstream_adoption": "emerging",
+      "top_articles": [
+        {
+          "url": "https://finance.yahoo.com/news/where-rigetti-computing-5-years-104500528.html",
+          "title": "Where Will Rigetti Computing Be in 5 Years ? ",
+          "domain": "finance.yahoo.com",
+          "country": "United States",
+          "date": "20251108T154500Z"
+        },
+        {
+          "url": "https://www.fool.com/investing/2025/11/07/nvidia-just-announced-huge-quantum-computing-news/",
+          "title": "Nvidia Just Announced Massive Quantum Computing News",
+          "domain": "fool.com",
+          "country": "United States",
+          "date": "20251107T180000Z"
+        },
+        {
+          "url": "https://www.fool.com/investing/2025/11/23/stock-split-watch-is-quantum-computing-qubt-next/",
+          "title": "Stock - Split Watch : Is Quantum Computing [ QUBT ] Next ? ",
+          "domain": "fool.com",
+          "country": "United States",
+          "date": "20251124T004500Z"
+        },
+        {
+          "url": "https://finance.yahoo.com/news/dont-miss-tech-stock-could-220500069.html",
+          "title": "Dont Miss Out : This Tech Stock Could Surge 67 % by Year - End 2025",
+          "domain": "finance.yahoo.com",
+          "country": "United States",
+          "date": "20251116T060000Z"
+        },
+        {
+          "url": "https://finance.yahoo.com/news/prediction-d-wave-quantums-stock-120000051.html",
+          "title": "Prediction : This Will Be D - Wave Quantum Stock Price by 2035",
+          "domain": "finance.yahoo.com",
+          "country": "United States",
+          "date": "20251124T211500Z"
+        }
+      ],
+      "errors": []
+    },
+    "finance": {
+      "source": "yahoo_finance",
+      "collected_at": "2025-12-02T09:51:01.756638",
+      "keyword": "quantum computing",
+      "companies_found": 7,
+      "tickers": [
+        "IBM",
+        "GOOGL",
+        "MSFT",
+        "AMZN",
+        "HON",
+        "IONQ",
+        "RGTI"
+      ],
+      "total_market_cap": 10370570045952.0,
+      "avg_market_cap": 1481510006564.5715,
+      "avg_price_change_1m": -0.09195513268444197,
+      "avg_price_change_6m": 0.3153752961386026,
+      "avg_price_change_2y": 3.5891840469742293,
+      "avg_volume_1m": 28065129.285714287,
+      "avg_volume_6m": 28688944.784027,
+      "volume_trend": "stable",
+      "avg_volatility_1m": 0.48544751723664525,
+      "avg_volatility_6m": 0.4624271712525365,
+      "market_maturity": "developing",
+      "investor_sentiment": "positive",
+      "investment_momentum": "decelerating",
+      "top_companies": [
+        {
+          "ticker": "GOOGL",
+          "name": "Alphabet Inc.",
+          "market_cap": 3813986271232.0,
+          "price_change_1m": 0.10986188246731154,
+          "sector": "Communication Services",
+          "industry": "Internet Content & Information"
+        },
+        {
+          "ticker": "MSFT",
+          "name": "Microsoft Corporation",
+          "market_cap": 3618019213312.0,
+          "price_change_1m": -0.05682269894425853,
+          "sector": "Technology",
+          "industry": "Software - Infrastructure"
+        },
+        {
+          "ticker": "AMZN",
+          "name": "Amazon.com, Inc.",
+          "market_cap": 2500227760128.0,
+          "price_change_1m": -0.0792125792015256,
+          "sector": "Consumer Cyclical",
+          "industry": "Internet Retail"
+        },
+        {
+          "ticker": "IBM",
+          "name": "International Business Machines Corporation",
+          "market_cap": 285720543232.0,
+          "price_change_1m": 0.008615356977531859,
+          "sector": "Technology",
+          "industry": "Information Technology Services"
+        },
+        {
+          "ticker": "HON",
+          "name": "Honeywell International Inc.",
+          "market_cap": 128183492608.0,
+          "price_change_1m": -0.03241482946877755,
+          "sector": "Industrials",
+          "industry": "Conglomerates"
+        }
+      ],
+      "errors": []
+    }
+  },
+  "collectors_succeeded": 5,
+  "partial_data": false,
+  "errors": []
+}

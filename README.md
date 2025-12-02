@@ -77,7 +77,8 @@ backend/
       news.py         # News collector (IMPLEMENTED - GDELT)
       finance.py      # Financial data collector (IMPLEMENTED - Yahoo Finance + DeepSeek)
     analyzers/        # LLM integration
-      deepseek.py     # DeepSeek API client (to be implemented)
+      deepseek.py     # DeepSeek API client (IMPLEMENTED - 439 lines)
+      hype_classifier.py # Main orchestration layer (IMPLEMENTED - 290 lines)
     routers/          # API endpoints
       health.py       # Health check endpoint
       analysis.py     # Main analysis endpoint (to be implemented)
@@ -88,6 +89,9 @@ backend/
     test_patents_collector.py # 20 tests for PatentsCollector
     test_news_collector.py    # 16 tests for NewsCollector
     test_finance_collector.py # 17 tests for FinanceCollector
+    test_deepseek_analyzer.py # 20 tests for DeepSeekAnalyzer
+    test_hype_classifier.py   # 12 tests for HypeCycleClassifier
+  test_real_classification.py # Integration test for end-to-end workflow
 frontend/
   index.html          # Web interface
   app.js              # Frontend logic
@@ -166,14 +170,16 @@ See `backend/.env.example` for all available configuration options:
 - ✓ Patent collector (PatentsView) with comprehensive tests (20 tests)
 - ✓ News collector (GDELT) with comprehensive tests (16 tests)
 - ✓ Financial data collector (Yahoo Finance + DeepSeek ticker discovery) with comprehensive tests (17 tests)
+- ✓ DeepSeek analyzer with two-stage classification (5 per-source + 1 synthesis) with comprehensive tests (20 tests)
+- ✓ HypeCycleClassifier orchestration layer with cache-first strategy, parallel execution, graceful degradation with comprehensive tests (12 tests)
 
 ### Next Steps
 
 Subsequent tasks will implement:
 
-1. DeepSeek analyzer with prompt engineering for hype cycle classification
-2. Analysis endpoint with caching logic and parallel collector execution
-3. Enhanced frontend visualization
+1. Analysis endpoint (FastAPI router) integrating HypeCycleClassifier
+2. Enhanced frontend visualization with per-source breakdowns
+3. Integration testing and deployment preparation
 
 ## Testing
 
@@ -211,6 +217,9 @@ curl http://localhost:8000/api/health
 - **PatentsCollector**: 20 tests covering API integration, error handling, edge cases, authentication, filing velocity, geographic reach
 - **NewsCollector**: 16 tests covering API integration, error handling, edge cases, sentiment/tone calculation, coverage trends, media attention
 - **FinanceCollector**: 17 tests covering DeepSeek integration, yfinance mocking, error handling, edge cases, market maturity, investor sentiment, instance isolation
+- **DeepSeekAnalyzer**: 20 tests covering initialization, full analysis, per-source analysis, synthesis, error handling, edge cases, JSON serialization
+- **HypeCycleClassifier**: 12 tests covering cache hit/miss, partial success scenarios, insufficient data error, parallel execution, database persistence, response assembly
+- **Integration Test**: End-to-end workflow validation with real API calls (test_real_classification.py)
 
 ## License
 
