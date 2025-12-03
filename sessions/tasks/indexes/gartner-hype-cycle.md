@@ -9,6 +9,7 @@ description: MVP application that analyzes emerging technologies and positions t
 ## Active Tasks
 
 ### High Priority
+- `h-fix-deepseek-json-parsing.md` - Fix JSON parsing error in DeepSeek analyzer that causes analysis failures for certain keywords
 
 ### Medium Priority
 - `m-implement-niche-query-expansion.md` - Implement DeepSeek-based query expansion for niche technologies with low social media presence
