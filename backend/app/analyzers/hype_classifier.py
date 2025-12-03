@@ -122,9 +122,13 @@ class HypeCycleClassifier:
                     raw_data = row[data_field]
                     collector_results[source] = json.loads(raw_data) if raw_data else None
 
-                # Reconstruct per_source_analyses if available (not in DB schema yet)
-                # For now, just return the final classification
-                per_source_analyses = {}
+                # Retrieve per_source_analyses from database
+                try:
+                    raw_per_source = row["per_source_analyses_data"]
+                    per_source_analyses = json.loads(raw_per_source) if raw_per_source else {}
+                except (json.JSONDecodeError, KeyError) as e:
+                    logger.warning(f"Failed to deserialize per_source_analyses for {keyword}: {e}")
+                    per_source_analyses = {}
 
                 # Assemble cached response
                 return self._assemble_response(
@@ -225,13 +229,17 @@ class HypeCycleClassifier:
         news_data = json.dumps(collector_results.get("news")) if collector_results.get("news") else None
         finance_data = json.dumps(collector_results.get("finance")) if collector_results.get("finance") else None
 
+        # Serialize per-source analyses from DeepSeek
+        per_source_analyses_data = json.dumps(analysis.get("per_source_analyses")) if analysis.get("per_source_analyses") else None
+
         # Insert into database
         query = """
             INSERT INTO analyses (
                 keyword, phase, confidence, reasoning,
                 social_data, papers_data, patents_data, news_data, finance_data,
+                per_source_analyses_data,
                 expires_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """
         params = (
             keyword,
@@ -243,6 +251,7 @@ class HypeCycleClassifier:
             patents_data,
             news_data,
             finance_data,
+            per_source_analyses_data,
             expires_at.isoformat()
         )
 

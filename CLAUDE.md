@@ -57,9 +57,10 @@ The application follows a three-tier architecture:
 **Database** (C:\Users\Hp\Desktop\Gartner's Hype Cycle\backend\app\database.py)
 - Async SQLite via aiosqlite (non-blocking for FastAPI)
 - Database file: C:\Users\Hp\Desktop\Gartner's Hype Cycle\data\hype_cycle.db
-- Schema: analyses table with keyword, phase, confidence, reasoning, collector data (JSON), timestamps
+- Schema: analyses table with keyword, phase, confidence, reasoning, collector data (JSON), per_source_analyses_data (JSON), timestamps
 - Indexes on keyword and expires_at for fast cache lookups
 - get_db() provides async context manager for connections
+- Idempotent migration system: Automatically adds missing columns on startup via PRAGMA table_info check
 
 **Health Check Router** (C:\Users\Hp\Desktop\Gartner's Hype Cycle\backend\app\routers\health.py)
 - GET /api/health endpoint
@@ -216,11 +217,12 @@ The application follows a three-tier architecture:
 - Raises exception if <3 collectors succeed: "Insufficient data: only X/5 collectors succeeded"
 - Error aggregation: tracks which collectors failed with descriptive error messages
 - DeepSeek integration: passes collector_results dict to analyzer.analyze() for two-stage classification
-- Database persistence: serializes collector data to JSON strings for storage in TEXT columns (social_data, papers_data, etc.)
+- Database persistence: serializes collector data AND per_source_analyses to JSON strings for storage in TEXT columns (social_data, papers_data, etc., per_source_analyses_data)
+- Cache retrieval: deserializes per_source_analyses from database with try-except error handling for graceful degradation on corrupted JSON
 - Cache TTL: expires_at = created_at + timedelta(hours=settings.cache_ttl_hours) (default 24 hours)
 - Comprehensive response structure:
   - Core classification: keyword, phase, confidence, reasoning
-  - Per-source breakdowns: per_source_analyses dict from DeepSeek (5 individual classifications)
+  - Per-source breakdowns: per_source_analyses dict from DeepSeek (5 individual classifications) - persisted to cache for consistent experience
   - Raw collector data: collector_data dict for transparency and debugging
   - Metadata: timestamp, cache_hit boolean, expires_at timestamp
   - Error tracking: collectors_succeeded count, partial_data boolean, errors list
@@ -819,7 +821,10 @@ The analyses table stores cached results:
 - confidence: LLM confidence score (0-1)
 - reasoning: LLM explanation text
 - social_data, papers_data, patents_data, news_data, finance_data: JSON blobs from collectors
+- per_source_analyses_data: JSON blob containing per-source LLM analyses (5 individual classifications)
 - expires_at: Cache expiration timestamp (default: 24 hours)
+
+Note: The per_source_analyses_data column was added via idempotent migration in database.py init_db() function. The migration checks for column existence using PRAGMA table_info and only runs ALTER TABLE if needed.
 
 ### CORS Configuration
 
@@ -1029,10 +1034,10 @@ The frontend implementation has been manually tested with multiple scenarios:
 
 **Cache Hit Test:**
 - Technology: Repeated "quantum computing" within 24 hours
-- Result: Core classification displayed correctly
-- Known issue: Per-source analyses shows "not available" due to database cache bug (see Known Issues)
+- Result: Core classification displayed correctly with all 5 per-source analysis cards
 - Status indicators: "Cached result from [timestamp]" badge, "Expires in ~X hours" badge
 - Response time: <1 second (as expected for cache hit)
+- Per-source analyses correctly retrieved from database cache
 
 **Error Handling Tests:**
 - Empty keyword: Displays "Please enter a technology keyword"
@@ -1122,24 +1127,5 @@ DATABASE_PATH in database.py uses Path(__file__).parent.parent.parent to resolve
 ### CORS Errors
 If frontend shows CORS policy errors, verify CORSMiddleware is configured in main.py and backend is running.
 
-### Database Cache Bug - Per-Source Analyses Missing (KNOWN ISSUE)
-**Status**: Identified but not yet fixed
-
-**Symptom**: When the backend returns cached analysis results (cache_hit=true), the `per_source_analyses` field is an empty dict `{}` instead of containing the 5 individual source classifications. This causes the frontend to display "Per-source analyses not available" even though the data exists.
-
-**Root Cause**: Database schema is missing a column to store per_source_analyses data. The current schema only has columns for the 5 collector data blobs (social_data, papers_data, etc.) but no column for the DeepSeek per-source analysis results.
-
-**Impact**:
-- Fresh analysis works correctly - per_source_analyses populated with all 5 sources (social, papers, patents, news, finance)
-- Cache hit returns empty per_source_analyses - frontend cannot display the 5 source cards
-- Users cannot see source breakdowns on cached results, only on fresh analyses
-
-**Required Fix** (backend-only, no frontend changes needed):
-1. Add `per_source_analyses_data TEXT` column to analyses table in database schema (C:\Users\Hp\Desktop\Gartner's Hype Cycle\backend\app\database.py)
-2. Update `_persist_result()` in HypeCycleClassifier to JSON-serialize and save per_source_analyses to the new column (C:\Users\Hp\Desktop\Gartner's Hype Cycle\backend\app\analyzers\hype_classifier.py, around line 230)
-3. Update `_check_cache()` in HypeCycleClassifier to parse per_source_analyses_data from database and include in returned result (same file, around line 130)
-4. Handle migration for existing database rows (either run ALTER TABLE or recreate database)
-
-**Workaround**: Clear cache by deleting rows from analyses table or waiting for 24-hour expiration to force fresh analysis.
-
-**Reference**: Discovered during frontend implementation task (sessions/tasks/m-implement-frontend.md), documented in work log 2025-12-02.
+### Database Migration Notes
+The database schema was updated to include per_source_analyses_data column for caching LLM analysis results. An idempotent migration in database.py init_db() automatically adds this column on server startup if it doesn't exist. The migration uses PRAGMA table_info to check column existence before running ALTER TABLE, ensuring safe execution across multiple startups and deployments.

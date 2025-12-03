@@ -9,7 +9,6 @@ description: MVP application that analyzes emerging technologies and positions t
 ## Active Tasks
 
 ### High Priority
-- `h-fix-cache-persource-analyses.md` - Fix missing per_source_analyses data in cached database results
 
 ### Medium Priority
 
@@ -28,3 +27,4 @@ description: MVP application that analyzes emerging technologies and positions t
 - `h-implement-hype-classifier.md` - Implement main classifier logic and synthesis of 5 data sources
 - `h-implement-api.md` - Implement FastAPI endpoints for analysis and caching
 - `m-implement-frontend.md` - Implement minimal HTML/JS frontend with hype cycle visualization
+- `h-fix-cache-persource-analyses.md` - Fix missing per_source_analyses data in cached database results via idempotent migration

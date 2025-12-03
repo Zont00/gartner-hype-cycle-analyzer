@@ -30,6 +30,15 @@ async def init_db():
                 expires_at TIMESTAMP
             )
         """)
+
+        # MIGRATION: Add per_source_analyses_data column if it doesn't exist
+        cursor = await db.execute("PRAGMA table_info(analyses)")
+        columns = await cursor.fetchall()
+        column_names = [col[1] for col in columns]
+
+        if "per_source_analyses_data" not in column_names:
+            await db.execute("ALTER TABLE analyses ADD COLUMN per_source_analyses_data TEXT")
+
         await db.execute("CREATE INDEX IF NOT EXISTS idx_keyword ON analyses(keyword)")
         await db.execute("CREATE INDEX IF NOT EXISTS idx_expires ON analyses(expires_at)")
         await db.commit()

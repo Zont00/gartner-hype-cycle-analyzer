@@ -105,7 +105,14 @@ async def test_classify_with_cache_hit(mock_settings):
             "papers_data": json.dumps({"publications": 120}),
             "patents_data": json.dumps({"patents": 85}),
             "news_data": json.dumps({"articles": 520}),
-            "finance_data": json.dumps({"companies": 8})
+            "finance_data": json.dumps({"companies": 8}),
+            "per_source_analyses_data": json.dumps({
+                "social": {"phase": "peak", "confidence": 0.85, "reasoning": "High mentions"},
+                "papers": {"phase": "slope", "confidence": 0.78, "reasoning": "Steady research"},
+                "patents": {"phase": "peak", "confidence": 0.80, "reasoning": "Accelerating"},
+                "news": {"phase": "peak", "confidence": 0.88, "reasoning": "High media"},
+                "finance": {"phase": "peak", "confidence": 0.75, "reasoning": "Strong returns"}
+            })
         }
 
         # Mock row dictionary access
@@ -129,6 +136,15 @@ async def test_classify_with_cache_hit(mock_settings):
         assert result["keyword"] == "quantum computing"
         assert result["phase"] == "peak"
         assert result["confidence"] == 0.82
+
+        # Verify per_source_analyses is persisted and retrieved
+        assert "per_source_analyses" in result
+        assert len(result["per_source_analyses"]) == 5
+        assert "social" in result["per_source_analyses"]
+        assert "papers" in result["per_source_analyses"]
+        assert "patents" in result["per_source_analyses"]
+        assert "news" in result["per_source_analyses"]
+        assert "finance" in result["per_source_analyses"]
 
 
 @pytest.mark.asyncio
