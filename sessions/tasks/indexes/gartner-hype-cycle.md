@@ -11,6 +11,7 @@ description: MVP application that analyzes emerging technologies and positions t
 ### High Priority
 
 ### Medium Priority
+- `m-implement-niche-query-expansion.md` - Implement DeepSeek-based query expansion for niche technologies with low social media presence
 
 ### Low Priority
 
