@@ -39,6 +39,13 @@ async def init_db():
         if "per_source_analyses_data" not in column_names:
             await db.execute("ALTER TABLE analyses ADD COLUMN per_source_analyses_data TEXT")
 
+        # MIGRATION: Add query expansion columns if they don't exist
+        if "query_expansion_applied" not in column_names:
+            await db.execute("ALTER TABLE analyses ADD COLUMN query_expansion_applied INTEGER DEFAULT 0")
+
+        if "expanded_terms_data" not in column_names:
+            await db.execute("ALTER TABLE analyses ADD COLUMN expanded_terms_data TEXT")
+
         await db.execute("CREATE INDEX IF NOT EXISTS idx_keyword ON analyses(keyword)")
         await db.execute("CREATE INDEX IF NOT EXISTS idx_expires ON analyses(expires_at)")
         await db.commit()

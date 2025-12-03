@@ -112,14 +112,19 @@ async def test_classify_with_cache_hit(mock_settings):
                 "patents": {"phase": "peak", "confidence": 0.80, "reasoning": "Accelerating"},
                 "news": {"phase": "peak", "confidence": 0.88, "reasoning": "High media"},
                 "finance": {"phase": "peak", "confidence": 0.75, "reasoning": "Strong returns"}
-            })
+            }),
+            "query_expansion_applied": 0,  # No expansion for cached result
+            "expanded_terms_data": None  # No expanded terms
         }
 
         # Mock row dictionary access
         def getitem(key):
             return mock_row[key]
+        def get(key, default=None):
+            return mock_row.get(key, default)
         mock_row_obj = Mock()
         mock_row_obj.__getitem__ = Mock(side_effect=getitem)
+        mock_row_obj.get = Mock(side_effect=get)
 
         # Set up async context manager for cursor
         mock_cursor.fetchone = AsyncMock(return_value=mock_row_obj)
@@ -145,6 +150,10 @@ async def test_classify_with_cache_hit(mock_settings):
         assert "patents" in result["per_source_analyses"]
         assert "news" in result["per_source_analyses"]
         assert "finance" in result["per_source_analyses"]
+
+        # Verify query expansion metadata
+        assert result["query_expansion_applied"] is False
+        assert result["expanded_terms"] == []
 
 
 @pytest.mark.asyncio

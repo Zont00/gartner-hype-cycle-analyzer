@@ -51,6 +51,8 @@ class AnalyzeResponse(BaseModel):
     collectors_succeeded: int = Field(ge=0, le=5, description="Number of collectors that succeeded")
     partial_data: bool = Field(description="Whether analysis was performed with partial data (<5 collectors)")
     errors: List[str] = Field(description="Error messages from failed collectors or analysis")
+    query_expansion_applied: bool = Field(description="Whether query expansion was used for this analysis")
+    expanded_terms: List[str] = Field(description="List of expanded search terms used (empty if no expansion)")
 
 
 @router.post(

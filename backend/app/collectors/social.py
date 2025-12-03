@@ -3,7 +3,7 @@ Social media collector using Hacker News Algolia API.
 Gathers discussion volume, engagement metrics, and trends for technology keywords.
 """
 from datetime import datetime, timedelta
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 import math
 import httpx
 
@@ -16,16 +16,20 @@ class SocialCollector(BaseCollector):
     API_URL = "https://hn.algolia.com/api/v1/search"
     TIMEOUT = 30.0
 
-    async def collect(self, keyword: str) -> Dict[str, Any]:
+    async def collect(self, keyword: str, expanded_terms: Optional[List[str]] = None) -> Dict[str, Any]:
         """
-        Collect Hacker News data for the given keyword.
+        Collect Hacker News data for the given keyword, optionally with expanded search terms.
 
         Queries the Hacker News Algolia API across three time periods
         (30 days, 6 months, 1 year) to analyze discussion volume,
         engagement metrics, and trends.
 
+        When expanded_terms is provided, searches for keyword OR any expanded term,
+        aggregating and deduplicating results.
+
         Args:
             keyword: Technology keyword to analyze
+            expanded_terms: Optional list of related search terms for query expansion
 
         Returns:
             Dictionary containing:
@@ -55,13 +59,13 @@ class SocialCollector(BaseCollector):
             async with httpx.AsyncClient(timeout=self.TIMEOUT) as client:
                 # Fetch data for each time period
                 data_30d = await self._fetch_period(
-                    client, keyword, thirty_days_ago, None, errors
+                    client, keyword, thirty_days_ago, None, errors, expanded_terms
                 )
                 data_6m = await self._fetch_period(
-                    client, keyword, six_months_ago, thirty_days_ago, errors
+                    client, keyword, six_months_ago, thirty_days_ago, errors, expanded_terms
                 )
                 data_1y = await self._fetch_period(
-                    client, keyword, one_year_ago, six_months_ago, errors
+                    client, keyword, one_year_ago, six_months_ago, errors, expanded_terms
                 )
 
                 # If all requests failed, return error state
@@ -156,10 +160,14 @@ class SocialCollector(BaseCollector):
         keyword: str,
         start_ts: int,
         end_ts: int | None,
-        errors: List[str]
+        errors: List[str],
+        expanded_terms: Optional[List[str]] = None
     ) -> Dict[str, Any] | None:
         """
         Fetch Hacker News data for a specific time period.
+
+        When expanded_terms is provided, queries for keyword OR each expanded term,
+        aggregating and deduplicating results by story ID.
 
         Args:
             client: Async HTTP client
@@ -167,6 +175,7 @@ class SocialCollector(BaseCollector):
             start_ts: Start timestamp (Unix)
             end_ts: End timestamp (Unix), or None for "until now"
             errors: List to append error messages to
+            expanded_terms: Optional list of related search terms
 
         Returns:
             API response dict or None if request failed
@@ -178,17 +187,65 @@ class SocialCollector(BaseCollector):
             else:
                 numeric_filter = f"created_at_i>{start_ts},created_at_i<{end_ts}"
 
-            response = await client.get(
-                self.API_URL,
-                params={
-                    "query": keyword,
-                    "tags": "story",
-                    "numericFilters": numeric_filter,
-                    "hitsPerPage": 20
+            # If no expanded terms, use single query (original behavior)
+            if not expanded_terms:
+                response = await client.get(
+                    self.API_URL,
+                    params={
+                        "query": keyword,
+                        "tags": "story",
+                        "numericFilters": numeric_filter,
+                        "hitsPerPage": 20
+                    }
+                )
+                response.raise_for_status()
+                return response.json()
+
+            # With expanded terms: query each term separately and aggregate
+            all_hits = []
+            seen_ids = set()
+            total_nb_hits = 0
+
+            # Query original keyword
+            terms_to_query = [keyword] + expanded_terms
+
+            for term in terms_to_query:
+                try:
+                    response = await client.get(
+                        self.API_URL,
+                        params={
+                            "query": term,
+                            "tags": "story",
+                            "numericFilters": numeric_filter,
+                            "hitsPerPage": 20
+                        }
+                    )
+                    response.raise_for_status()
+                    data = response.json()
+
+                    # Accumulate nbHits (total matches across all terms)
+                    total_nb_hits += data.get("nbHits", 0)
+
+                    # Deduplicate hits by objectID
+                    for hit in data.get("hits", []):
+                        obj_id = hit.get("objectID")
+                        if obj_id and obj_id not in seen_ids:
+                            all_hits.append(hit)
+                            seen_ids.add(obj_id)
+
+                except Exception as term_error:
+                    # Continue with other terms if one fails
+                    errors.append(f"Term '{term}' failed: {str(term_error)}")
+                    continue
+
+            # Return aggregated response
+            if all_hits or total_nb_hits > 0:
+                return {
+                    "hits": all_hits,
+                    "nbHits": total_nb_hits
                 }
-            )
-            response.raise_for_status()
-            return response.json()
+            else:
+                return None
 
         except httpx.HTTPStatusError as e:
             if e.response.status_code == 429:

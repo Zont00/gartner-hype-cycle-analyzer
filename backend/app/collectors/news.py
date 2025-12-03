@@ -3,7 +3,7 @@ News coverage collector using GDELT API.
 Gathers news media signals, sentiment/tone, and coverage trends for technology keywords.
 """
 from datetime import datetime, timedelta
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 import httpx
 
 from app.collectors.base import BaseCollector
@@ -15,13 +15,15 @@ class NewsCollector(BaseCollector):
     API_URL = "https://api.gdeltproject.org/api/v2/doc/doc"
     TIMEOUT = 30.0
 
-    async def collect(self, keyword: str) -> Dict[str, Any]:
+    async def collect(self, keyword: str, expanded_terms: Optional[List[str]] = None) -> Dict[str, Any]:
         """
-        Collect GDELT news data for the given keyword.
+        Collect GDELT news data for the given keyword, optionally with expanded search terms.
 
         Queries the GDELT API across three time periods
         (30 days, 3 months, 1 year) to analyze news volume,
         sentiment/tone, geographic distribution, and media attention trends.
+
+        When expanded_terms is provided, uses OR operator in GDELT query.
 
         Args:
             keyword: Technology keyword to analyze
@@ -69,13 +71,13 @@ class NewsCollector(BaseCollector):
             async with httpx.AsyncClient(timeout=self.TIMEOUT) as client:
                 # Fetch data for each time period
                 data_30d = await self._fetch_period(
-                    client, keyword, start_30d, end_30d, errors
+                    client, keyword, start_30d, end_30d, errors, expanded_terms
                 )
                 data_3m = await self._fetch_period(
-                    client, keyword, start_3m, end_3m, errors
+                    client, keyword, start_3m, end_3m, errors, expanded_terms
                 )
                 data_1y = await self._fetch_period(
-                    client, keyword, start_1y, end_1y, errors
+                    client, keyword, start_1y, end_1y, errors, expanded_terms
                 )
 
                 # If all requests failed, return error state
@@ -214,7 +216,8 @@ class NewsCollector(BaseCollector):
         keyword: str,
         start_datetime: str,
         end_datetime: str,
-        errors: List[str]
+        errors: List[str],
+        expanded_terms: Optional[List[str]] = None
     ) -> Dict[str, Any] | None:
         """
         Fetch GDELT data for a specific time period.
@@ -224,22 +227,29 @@ class NewsCollector(BaseCollector):
         - TimelineVol mode for volume trends
         - ToneChart mode for sentiment distribution
 
+        When expanded_terms is provided, constructs OR query with GDELT syntax.
+
         Args:
             client: Async HTTP client
             keyword: Search term
             start_datetime: Start timestamp (YYYYMMDDHHMMSS format)
             end_datetime: End timestamp (YYYYMMDDHHMMSS format)
             errors: List to append error messages to
+            expanded_terms: Optional list of related search terms
 
         Returns:
             Aggregated data dict or None if all requests failed
         """
         try:
-            # CRITICAL: Wrap keyword in quotes for exact phrase matching
-            # This ensures "quantum computing" searches for the exact phrase,
-            # not articles containing "quantum" OR "computing" separately
-            # Same pattern as PapersCollector (reduces false positives by 99.9%)
-            search_query = f'"{keyword}"'
+            # Build search query with OR expansion if expanded_terms provided
+            # GDELT requires parentheses around OR operator: ("term1" OR "term2")
+            if expanded_terms:
+                # Construct: ("keyword" OR "term1" OR "term2" ...)
+                terms_str = " OR ".join([f'"{keyword}"'] + [f'"{term}"' for term in expanded_terms])
+                search_query = f"({terms_str})"
+            else:
+                # Original behavior: exact phrase matching with quotes
+                search_query = f'"{keyword}"'
 
             # Base parameters for all requests
             base_params = {

@@ -21,3 +21,7 @@ yfinance>=0.2.32          # Yahoo Finance data fetching
 
 # Optional but useful for MVP
 requests>=2.31.0          # Fallback sync HTTP (some APIs might be simpler sync)
+
+# Testing
+pytest>=7.4.3             # Testing framework
+pytest-asyncio>=0.21.1    # Async test support for pytest

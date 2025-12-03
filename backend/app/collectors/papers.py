@@ -3,7 +3,7 @@ Research papers collector using Semantic Scholar API.
 Gathers publication metrics, citation data, and academic research trends for technology keywords.
 """
 from datetime import datetime
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 import httpx
 
 from app.collectors.base import BaseCollector
@@ -16,16 +16,19 @@ class PapersCollector(BaseCollector):
     API_URL = "https://api.semanticscholar.org/graph/v1/paper/search/bulk"
     TIMEOUT = 30.0
 
-    async def collect(self, keyword: str) -> Dict[str, Any]:
+    async def collect(self, keyword: str, expanded_terms: Optional[List[str]] = None) -> Dict[str, Any]:
         """
-        Collect Semantic Scholar research paper data for the given keyword.
+        Collect Semantic Scholar research paper data for the given keyword, optionally with expanded search terms.
 
         Queries the Semantic Scholar API across multiple time periods
         (2 years, 5 years) to analyze publication volume, citation metrics,
         research velocity, and academic attention trends.
 
+        When expanded_terms is provided, uses Boolean OR to search for keyword OR any expanded term.
+
         Args:
             keyword: Technology keyword to analyze
+            expanded_terms: Optional list of related search terms for query expansion
 
         Returns:
             Dictionary containing:
@@ -56,10 +59,10 @@ class PapersCollector(BaseCollector):
             async with httpx.AsyncClient(timeout=self.TIMEOUT) as client:
                 # Fetch data for each time period
                 data_2y = await self._fetch_period(
-                    client, keyword, year_2y_start, current_year, errors
+                    client, keyword, year_2y_start, current_year, errors, expanded_terms
                 )
                 data_5y = await self._fetch_period(
-                    client, keyword, year_5y_start, year_2y_start, errors
+                    client, keyword, year_5y_start, year_2y_start, errors, expanded_terms
                 )
 
                 # If all requests failed, return error state
@@ -190,10 +193,13 @@ class PapersCollector(BaseCollector):
         keyword: str,
         year_start: int,
         year_end: int,
-        errors: List[str]
+        errors: List[str],
+        expanded_terms: Optional[List[str]] = None
     ) -> Dict[str, Any] | None:
         """
         Fetch Semantic Scholar data for a specific time period.
+
+        When expanded_terms is provided, constructs Boolean OR query with all terms.
 
         Args:
             client: Async HTTP client
@@ -201,6 +207,7 @@ class PapersCollector(BaseCollector):
             year_start: Start year (inclusive)
             year_end: End year (exclusive)
             errors: List to append error messages to
+            expanded_terms: Optional list of related search terms
 
         Returns:
             API response dict or None if request failed
@@ -218,12 +225,21 @@ class PapersCollector(BaseCollector):
             if settings.semantic_scholar_api_key:
                 headers["x-api-key"] = settings.semantic_scholar_api_key
 
+            # Build query with OR expansion if expanded_terms provided
+            # Semantic Scholar uses | for OR operator
+            if expanded_terms:
+                # Construct: "keyword" | "term1" | "term2" ...
+                query_parts = [f'"{keyword}"'] + [f'"{term}"' for term in expanded_terms]
+                query_str = " | ".join(query_parts)
+            else:
+                # Original behavior: exact phrase matching with quotes
+                query_str = f'"{keyword}"'
+
             # Make request to Semantic Scholar API
-            # Always wrap keyword with quotes for exact phrase matching
             response = await client.get(
                 self.API_URL,
                 params={
-                    "query": f'"{keyword}"',
+                    "query": query_str,
                     "year": year_filter,
                     "fields": fields,
                     "limit": 100  # Maximum allowed per request

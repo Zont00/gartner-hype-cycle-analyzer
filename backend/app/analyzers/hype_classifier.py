@@ -59,8 +59,28 @@ class HypeCycleClassifier:
         # Run collectors in parallel
         collector_results, collector_errors = await self._run_collectors(keyword)
 
-        # Check minimum threshold
+        # Track query expansion metadata
+        query_expansion_applied = False
+        expanded_terms = []
+
+        # Check if niche technology
         successful = [r for r in collector_results.values() if r is not None]
+        is_niche = self._detect_niche(collector_results)
+
+        if is_niche:
+            # Apply query expansion for all niche technologies
+            logger.info(f"Niche technology detected ({len(successful)}/5 collectors initially). Applying query expansion...")
+            collector_results, collector_errors, expanded_terms = await self._expand_query_and_rerun(
+                keyword, collector_results, collector_errors
+            )
+
+            # Recount successful collectors after expansion
+            successful = [r for r in collector_results.values() if r is not None]
+            if expanded_terms:
+                query_expansion_applied = True
+                logger.info(f"Query expansion completed. Now {len(successful)}/5 collectors succeeded.")
+
+        # Check minimum threshold after potential expansion
         if len(successful) < self.MINIMUM_SOURCES_REQUIRED:
             raise Exception(
                 f"Insufficient data: only {len(successful)}/5 collectors succeeded. "
@@ -72,8 +92,12 @@ class HypeCycleClassifier:
         analyzer = DeepSeekAnalyzer(api_key=self.settings.deepseek_api_key)
         analysis = await analyzer.analyze(keyword, collector_results)
 
-        # Persist to database
-        result = await self._persist_result(keyword, analysis, collector_results, db)
+        # Persist to database with query expansion metadata
+        result = await self._persist_result(
+            keyword, analysis, collector_results, db,
+            query_expansion_applied=query_expansion_applied,
+            expanded_terms=expanded_terms
+        )
 
         # Assemble final response
         return self._assemble_response(
@@ -83,7 +107,9 @@ class HypeCycleClassifier:
             collector_errors=collector_errors,
             cache_hit=False,
             created_at=result["created_at"],
-            expires_at=result["expires_at"]
+            expires_at=result["expires_at"],
+            query_expansion_applied=query_expansion_applied,
+            expanded_terms=expanded_terms
         )
 
     async def _check_cache(self, keyword: str, db: aiosqlite.Connection) -> Optional[Dict[str, Any]]:
@@ -130,6 +156,16 @@ class HypeCycleClassifier:
                     logger.warning(f"Failed to deserialize per_source_analyses for {keyword}: {e}")
                     per_source_analyses = {}
 
+                # Retrieve query expansion metadata
+                try:
+                    query_expansion_applied = bool(row.get("query_expansion_applied", 0))
+                    raw_expanded_terms = row.get("expanded_terms_data")
+                    expanded_terms = json.loads(raw_expanded_terms) if raw_expanded_terms else []
+                except (json.JSONDecodeError, KeyError) as e:
+                    logger.warning(f"Failed to deserialize expanded_terms for {keyword}: {e}")
+                    query_expansion_applied = False
+                    expanded_terms = []
+
                 # Assemble cached response
                 return self._assemble_response(
                     keyword=keyword,
@@ -143,7 +179,9 @@ class HypeCycleClassifier:
                     collector_errors=[],
                     cache_hit=True,
                     created_at=row["created_at"],
-                    expires_at=row["expires_at"]
+                    expires_at=row["expires_at"],
+                    query_expansion_applied=query_expansion_applied,
+                    expanded_terms=expanded_terms
                 )
         except Exception as e:
             # Cache check failure should not block analysis
@@ -199,12 +237,129 @@ class HypeCycleClassifier:
         logger.info(f"Collectors completed: {len([r for r in collector_results.values() if r is not None])}/5 succeeded")
         return collector_results, errors
 
+    def _detect_niche(self, collector_results: Dict[str, Optional[Dict[str, Any]]]) -> bool:
+        """
+        Detect if technology is niche based on social media metrics.
+
+        Uses SocialCollector data as primary niche detection signal:
+        - mentions_30d < 50 OR mentions_total < 100
+
+        Args:
+            collector_results: Results from all collectors
+
+        Returns:
+            True if technology appears to be niche, False otherwise
+        """
+        social_data = collector_results.get("social")
+        if not social_data:
+            # No social data, can't detect - assume not niche
+            return False
+
+        mentions_30d = social_data.get("mentions_30d", 0)
+        mentions_total = social_data.get("mentions_total", 0)
+
+        # Niche criteria from task requirements
+        is_niche = mentions_30d < 50 or mentions_total < 100
+
+        if is_niche:
+            logger.info(
+                f"Niche technology detected: mentions_30d={mentions_30d}, "
+                f"mentions_total={mentions_total}"
+            )
+
+        return is_niche
+
+    async def _expand_query_and_rerun(
+        self,
+        keyword: str,
+        collector_results: Dict[str, Optional[Dict[str, Any]]],
+        errors: List[str]
+    ) -> tuple[Dict[str, Optional[Dict[str, Any]]], List[str], List[str]]:
+        """
+        Expand query using DeepSeek and re-run collectors with broader terms.
+
+        Workflow:
+        1. Use DeepSeek to generate 3-5 related search terms
+        2. Re-run 4 collectors (Social, Papers, Patents, News) with expanded queries
+        3. Skip FinanceCollector (already uses DeepSeek for ticker discovery)
+
+        Args:
+            keyword: Original technology keyword
+            collector_results: Initial collector results (may have failures)
+            errors: Initial error list
+
+        Returns:
+            Tuple of (updated_collector_results, updated_errors, expanded_terms)
+        """
+        logger.info(f"Attempting query expansion for niche keyword: {keyword}")
+
+        # Step 1: Generate expanded terms via DeepSeek
+        expanded_terms = []
+        try:
+            analyzer = DeepSeekAnalyzer(api_key=self.settings.deepseek_api_key)
+            expanded_terms = await analyzer.generate_expanded_terms(keyword)
+            logger.info(f"Generated expanded terms: {expanded_terms}")
+        except Exception as e:
+            error_msg = f"Query expansion failed: {str(e)}"
+            logger.warning(error_msg)
+            errors.append(error_msg)
+            # Return original results if expansion fails
+            return collector_results, errors, []
+
+        # Step 2: Re-instantiate collectors (only 4, NOT Finance)
+        collectors_to_rerun = {
+            "social": SocialCollector(),
+            "papers": PapersCollector(),
+            "patents": PatentsCollector(),
+            "news": NewsCollector()
+        }
+
+        # Step 3: Re-run collectors with expanded terms
+        tasks = [
+            collector.collect(keyword, expanded_terms=expanded_terms)
+            for collector in collectors_to_rerun.values()
+        ]
+
+        try:
+            results = await asyncio.wait_for(
+                asyncio.gather(*tasks, return_exceptions=True),
+                timeout=self.COLLECTOR_TIMEOUT_SECONDS
+            )
+        except asyncio.TimeoutError:
+            logger.warning(f"Expanded query timeout after {self.COLLECTOR_TIMEOUT_SECONDS} seconds")
+            errors.append(f"Query expansion: Timeout after {self.COLLECTOR_TIMEOUT_SECONDS}s")
+            # Return original results on timeout
+            return collector_results, errors, expanded_terms
+
+        # Step 4: Update collector_results with expanded query results
+        for source_name, result in zip(collectors_to_rerun.keys(), results):
+            if isinstance(result, Exception):
+                error_msg = f"Query expansion: {source_name} collector failed: {str(result)}"
+                logger.warning(error_msg)
+                errors.append(error_msg)
+                # Keep original result if re-run failed
+            else:
+                # Update with expanded query result
+                collector_results[source_name] = result
+                logger.info(f"Query expansion: {source_name} collector succeeded with expanded terms")
+
+        # Step 5: Log final status
+        successful = [r for r in collector_results.values() if r is not None]
+        logger.info(
+            f"After query expansion: {len(successful)}/5 collectors succeeded "
+            f"(expanded terms: {expanded_terms})"
+        )
+
+        return collector_results, errors, expanded_terms
+
     async def _persist_result(
         self,
         keyword: str,
         analysis: Dict[str, Any],
         collector_results: Dict[str, Optional[Dict[str, Any]]],
-        db: aiosqlite.Connection
+        db: aiosqlite.Connection,
+        query_expansion_applied: bool = False,
+        expanded_terms: List[str] = None
     ) -> Dict[str, Any]:
         """
         Persist analysis result to database.
@@ -232,14 +387,18 @@ class HypeCycleClassifier:
         # Serialize per-source analyses from DeepSeek
         per_source_analyses_data = json.dumps(analysis.get("per_source_analyses")) if analysis.get("per_source_analyses") else None
 
+        # Serialize query expansion data
+        expanded_terms_data = json.dumps(expanded_terms) if expanded_terms else None
+
         # Insert into database
         query = """
             INSERT INTO analyses (
                 keyword, phase, confidence, reasoning,
                 social_data, papers_data, patents_data, news_data, finance_data,
                 per_source_analyses_data,
+                query_expansion_applied, expanded_terms_data,
                 expires_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """
         params = (
             keyword,
@@ -252,6 +411,8 @@ class HypeCycleClassifier:
             news_data,
             finance_data,
             per_source_analyses_data,
+            1 if query_expansion_applied else 0,  # INTEGER boolean
+            expanded_terms_data,
             expires_at.isoformat()
         )
 
@@ -271,7 +432,9 @@ class HypeCycleClassifier:
         collector_errors: List[str],
         cache_hit: bool,
         created_at: str,
-        expires_at: str
+        expires_at: str,
+        query_expansion_applied: bool = False,
+        expanded_terms: List[str] = None
     ) -> Dict[str, Any]:
         """
         Assemble comprehensive response with all data.
@@ -284,6 +447,8 @@ class HypeCycleClassifier:
             cache_hit: Whether result came from cache
             created_at: ISO timestamp of analysis
             expires_at: ISO timestamp of cache expiration
+            query_expansion_applied: Whether query expansion was used
+            expanded_terms: List of expanded search terms (None if not used)
 
         Returns:
             Complete response dict
@@ -315,7 +480,11 @@ class HypeCycleClassifier:
             # Error tracking
             "collectors_succeeded": collectors_succeeded,
             "partial_data": collectors_succeeded < 5,
-            "errors": all_errors
+            "errors": all_errors,
+
+            # Query expansion metadata
+            "query_expansion_applied": query_expansion_applied,
+            "expanded_terms": expanded_terms if expanded_terms else []
         }
 
         return response

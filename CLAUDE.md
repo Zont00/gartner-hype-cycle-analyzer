@@ -30,12 +30,19 @@ The application follows a three-tier architecture:
    - Patent Collector (C:\Users\Hp\Desktop\Gartner's Hype Cycle\backend\app\collectors\patents.py) - IMPLEMENTED
    - News Collector (C:\Users\Hp\Desktop\Gartner's Hype Cycle\backend\app\collectors\news.py) - IMPLEMENTED
    - Financial Data Collector (C:\Users\Hp\Desktop\Gartner's Hype Cycle\backend\app\collectors\finance.py) - IMPLEMENTED
-6. Orchestrator validates minimum 3 of 5 collectors succeeded (graceful degradation)
-7. DeepSeek analyzer performs two-stage classification: 5 per-source analyses + 1 final synthesis (C:\Users\Hp\Desktop\Gartner's Hype Cycle\backend\app\analyzers\deepseek.py)
-8. Orchestrator persists result to database with 24-hour cache TTL, JSON-serialized collector data
-9. Comprehensive response assembled with phase, confidence, reasoning, per-source analyses, collector data, metadata, and errors
-10. Result returned to frontend
-11. Frontend renders hype cycle curve visualization with technology position marker, displays per-source analyses breakdowns, status indicators, and comprehensive error handling
+6. **Niche Detection & Query Expansion** (IMPLEMENTED - hype_classifier.py:240-353):
+   - Orchestrator detects niche technologies via social metrics (mentions_30d < 50 OR mentions_total < 100)
+   - For niche technologies, DeepSeek generates 3-5 related search terms (e.g., "plant cell culture" → ["plant tissue culture", "in vitro propagation", "micropropagation", "callus culture", "somatic embryogenesis"])
+   - Re-runs 4 collectors (Social, Papers, Patents, News) with expanded queries using OR logic
+   - FinanceCollector NOT re-run (already uses DeepSeek for ticker discovery)
+   - Validation tested: "plant cell culture" improved from 93 → 2,535 papers (+2,626%), 87 → 942 patents (+983%), 1 → 11 social mentions (+1,000%)
+   - Query expansion metadata tracked in response (query_expansion_applied: bool, expanded_terms: List[str])
+7. Orchestrator validates minimum 3 of 5 collectors succeeded (graceful degradation) - now more likely to succeed after query expansion
+8. DeepSeek analyzer performs two-stage classification: 5 per-source analyses + 1 final synthesis (C:\Users\Hp\Desktop\Gartner's Hype Cycle\backend\app\analyzers\deepseek.py)
+9. Orchestrator persists result to database with 24-hour cache TTL, JSON-serialized collector data, plus query expansion metadata
+10. Comprehensive response assembled with phase, confidence, reasoning, per-source analyses, collector data, metadata, errors, and query expansion details
+11. Result returned to frontend
+12. Frontend renders hype cycle curve visualization with technology position marker, displays per-source analyses breakdowns, status indicators, and comprehensive error handling
 
 ## Key Components
 
@@ -70,33 +77,40 @@ The application follows a three-tier architecture:
 **Analysis Router** (C:\Users\Hp\Desktop\Gartner's Hype Cycle\backend\app\routers\analysis.py) - IMPLEMENTED
 - POST /api/analyze endpoint - main entry point for technology analysis
 - Request validation: Pydantic AnalyzeRequest model with keyword field (min_length=1, max_length=100, whitespace stripping)
-- Response structure: Pydantic AnalyzeResponse model matching HypeCycleClassifier output (13 fields total)
+- Response structure: Pydantic AnalyzeResponse model matching HypeCycleClassifier output (15 fields total including query expansion metadata)
+- **Query Expansion Fields** (IMPLEMENTED - analysis.py:54-55): query_expansion_applied (bool), expanded_terms (List[str]) in response model
 - Integrates with HypeCycleClassifier via dependency injection pattern
 - Database connection: async aiosqlite.Connection via Depends(get_db)
 - Error handling:
   - HTTP 422 Unprocessable Entity: Automatic validation errors (empty keyword, too long, invalid JSON) - handled by FastAPI/Pydantic
-  - HTTP 503 Service Unavailable: Insufficient data (<3 collectors succeeded) - temporary condition with detailed error message
+  - HTTP 503 Service Unavailable: Insufficient data (<3 collectors succeeded) - temporary condition with detailed error message (less common now with query expansion)
   - HTTP 500 Internal Server Error: Unexpected errors (database failures, DeepSeek API errors, etc.)
 - Performance characteristics:
-  - Fresh analysis: ~48 seconds (5 collectors + 6 DeepSeek LLM calls)
+  - Fresh analysis (mainstream): ~48 seconds (5 collectors + 6 DeepSeek LLM calls)
+  - Fresh analysis (niche with expansion): ~60-70 seconds (initial 5 collectors + expansion call + 4 collector re-runs + 6 DeepSeek LLM calls)
   - Cache hit: <1 second (database query only)
   - Cache TTL: 24 hours (configurable via CACHE_TTL_HOURS env var)
 - Comprehensive OpenAPI documentation with examples for all HTTP status codes (200, 422, 500, 503)
 - Logging: info level for successful analyses, warning for insufficient data, exception tracebacks for unexpected errors
-- Returns complete analysis with phase, confidence, reasoning, per-source analyses, collector data, metadata, and error tracking
+- Returns complete analysis with phase, confidence, reasoning, per-source analyses, collector data, metadata, error tracking, and query expansion details
 
 **Base Collector Interface** (C:\Users\Hp\Desktop\Gartner's Hype Cycle\backend\app\collectors\base.py)
-- Abstract base class defining collect(keyword) -> Dict[str, Any]
+- Abstract base class defining collect(keyword, expanded_terms) -> Dict[str, Any]
 - All collectors inherit from BaseCollector
 - Standardized return structure for LLM consumption
+- **Query Expansion Support** (IMPLEMENTED): Optional expanded_terms parameter (List[str]) for niche query expansion
+  - When provided, collectors search for original keyword OR any expanded term
+  - Enables broader data collection for niche technologies with low initial results
 
 **Social Media Collector** (C:\Users\Hp\Desktop\Gartner's Hype Cycle\backend\app\collectors\social.py) - IMPLEMENTED
 - Queries Hacker News Algolia API (https://hn.algolia.com/api/v1/search)
 - Time-series analysis across three periods: 30 days, 6 months, 1 year (non-overlapping windows)
 - Metrics returned: mentions_30d, mentions_6m, mentions_1y, mentions_total
+- **Niche Detection Metrics**: mentions_30d and mentions_total are PRIMARY niche detection signals (mentions_30d < 50 OR mentions_total < 100 triggers query expansion)
 - Engagement: avg_points_30d, avg_comments_30d, avg_points_6m, avg_comments_6m
 - Derived insights: sentiment (-1.0 to 1.0), recency (high/medium/low), growth_trend (increasing/stable/decreasing), momentum (accelerating/steady/decelerating)
 - Returns top 5 stories with titles, points, comments, age for LLM context
+- **Query Expansion Support** (IMPLEMENTED - social.py:157-267): When expanded_terms provided, aggregates results from multiple API calls (keyword + each expanded term), deduplicates by objectID
 - Graceful error handling - never raises exceptions, returns fallback data on failures
 - Errors tracked in "errors" field for partial failure visibility
 - IMPORTANT: Uses HTTPS endpoint (HTTP causes 301 redirect)
@@ -106,6 +120,7 @@ The application follows a three-tier architecture:
 - Queries Semantic Scholar API bulk search endpoint (https://api.semanticscholar.org/graph/v1/paper/search/bulk)
 - Time-windowed analysis: 2-year and 5-year periods (suitable for academic publishing cycles)
 - IMPORTANT: Uses bulk endpoint with quote-wrapped keywords for exact phrase matching (reduces false positives by 99.9%)
+- **Query Expansion Support** (IMPLEMENTED - papers.py:190-274): Constructs OR query with pipe separator (query: "keyword" | "term1" | "term2") per Semantic Scholar syntax
 - Metrics returned: publications_2y, publications_5y, publications_total
 - Citation metrics: avg_citations_2y, avg_citations_5y, citation_velocity
 - Research breadth: author_diversity, venue_diversity
@@ -123,6 +138,7 @@ The application follows a three-tier architecture:
 - API uses GET requests with JSON-stringified query parameters that must be manually URL-encoded
 - Field names: patent_id (not patent_number), patent_num_times_cited_by_us_patents (for citations)
 - CRITICAL: Query operator: _text_all for keyword matching in patent_title and patent_abstract fields (ensures ALL words present, prevents false positives)
+- **Query Expansion Support** (IMPLEMENTED - patents.py:215-320): Constructs nested OR clauses with _or wrapping multiple _text_all clauses for each term, maintaining exact phrase matching per term
 - Metrics returned: patents_2y, patents_5y, patents_10y, patents_total
 - Assignee metrics: unique_assignees, top_assignees (top 5 by patent count)
 - Geographic distribution: countries dict with patent counts, geographic_diversity
@@ -139,6 +155,7 @@ The application follows a three-tier architecture:
 - Queries GDELT Doc API v2 (https://api.gdeltproject.org/api/v2/doc/doc)
 - Time-windowed analysis: 30 days, 3 months (excluding last 30d), 1 year (excluding last 3m) - matches news cycle characteristics
 - IMPORTANT: Uses quote wrapping for exact phrase matching (same pattern as PapersCollector - reduces false positives by ~99%)
+- **Query Expansion Support** (IMPLEMENTED - news.py:213-312): Constructs OR query with parentheses wrapper ("keyword" OR "term1" OR "term2") per GDELT syntax requirements
 - Three API modes queried per time period: ArtList (article metadata), TimelineVol (volume trends), ToneChart (sentiment distribution)
 - API parameters: Uses GDELT datetime format (YYYYMMDDHHMMSS), maxrecords=250 per period (750 total articles)
 - Metrics returned: articles_30d, articles_3m, articles_1y, articles_total
@@ -159,6 +176,7 @@ The application follows a three-tier architecture:
 - Time-windowed analysis: 1 month, 6 months, 2 years (matches financial market cycles and earnings seasons)
 - CRITICAL: Uses DeepSeek LLM API to intelligently map technology keywords to relevant stock ticker symbols
 - Ticker discovery: Sends keyword to DeepSeek with prompt requesting 5-10 relevant tickers, falls back to tech ETFs (QQQ, XLK) on failure
+- **Query Expansion NOT Applied**: Finance collector is excluded from query expansion workflow because it already uses DeepSeek for intelligent keyword mapping - applying expanded terms would be redundant and potentially confusing
 - Instance-level ticker cache (_ticker_cache dict) for performance optimization - thread-safe per instance
 - Ticker format validation: Regex ^[A-Z]{1,5}$ to ensure valid US stock ticker symbols
 - IMPORTANT: yfinance is synchronous, wrapped in ThreadPoolExecutor for async compatibility with FastAPI event loop
@@ -178,6 +196,11 @@ The application follows a three-tier architecture:
 
 **DeepSeek Analyzer** (C:\Users\Hp\Desktop\Gartner's Hype Cycle\backend\app\analyzers\deepseek.py) - IMPLEMENTED
 - Two-stage LLM analysis architecture: 5 per-source classifications + 1 final synthesis (6 total API calls)
+- **Query Expansion Generator** (IMPLEMENTED - deepseek.py:440-553): generate_expanded_terms(keyword) method uses DeepSeek to produce 3-5 related search terms for niche technologies
+  - Temperature: 0.4 (slightly higher for term diversity while maintaining determinism)
+  - Validation: Rejects generic terms (technology, system, innovation, solution, etc.), rejects duplicate of original keyword, requires 3-5 valid terms
+  - Example expansions: "plant cell culture" → ["plant tissue culture", "in vitro propagation", "micropropagation", "callus culture", "somatic embryogenesis"]
+  - Used by HypeCycleClassifier._expand_query_and_rerun() workflow
 - Classifies technologies into 5 Gartner Hype Cycle phases:
   - innovation_trigger: Innovation Trigger
   - peak: Peak of Inflated Expectations
@@ -213,23 +236,33 @@ The application follows a three-tier architecture:
 - Returns cached result immediately on cache hit, avoiding all collector/LLM API calls
 - Parallel collector execution: instantiates all 5 collectors, runs collect() in parallel via asyncio.gather(return_exceptions=True)
 - 120-second timeout for entire collector execution batch (asyncio.wait_for wrapper)
-- Graceful degradation: continues with partial data if ≥3 of 5 collectors succeed
+- **Niche Detection** (IMPLEMENTED - hype_classifier.py:240-270): _detect_niche() method checks social_data for mentions_30d < 50 OR mentions_total < 100
+- **Query Expansion Workflow** (IMPLEMENTED - hype_classifier.py:272-353): _expand_query_and_rerun() orchestrates expansion for niche technologies
+  - Step 1: Call DeepSeekAnalyzer.generate_expanded_terms() to get 3-5 related search terms
+  - Step 2: Re-instantiate 4 collectors (Social, Papers, Patents, News) - NOT Finance
+  - Step 3: Re-run collectors with expanded_terms parameter, 120s timeout applies to re-run batch
+  - Step 4: Update collector_results with expanded query results (keeps original if re-run fails)
+  - Step 5: Recount successful collectors after expansion
+  - Fallback: If expansion fails (DeepSeek error, timeout), continues with original collector results
+  - Logging: Tracks niche detection, expansion attempt, success/failure of re-runs
+- Graceful degradation: continues with partial data if ≥3 of 5 collectors succeed (now more achievable after query expansion)
 - Raises exception if <3 collectors succeed: "Insufficient data: only X/5 collectors succeeded"
 - Error aggregation: tracks which collectors failed with descriptive error messages
 - DeepSeek integration: passes collector_results dict to analyzer.analyze() for two-stage classification
-- Database persistence: serializes collector data AND per_source_analyses to JSON strings for storage in TEXT columns (social_data, papers_data, etc., per_source_analyses_data)
-- Cache retrieval: deserializes per_source_analyses from database with try-except error handling for graceful degradation on corrupted JSON
+- Database persistence: serializes collector data, per_source_analyses, query_expansion_applied (INTEGER 0/1), expanded_terms_data (JSON array) to database TEXT columns
+- Cache retrieval: deserializes per_source_analyses, query_expansion_applied, expanded_terms from database with try-except error handling
 - Cache TTL: expires_at = created_at + timedelta(hours=settings.cache_ttl_hours) (default 24 hours)
 - Comprehensive response structure:
   - Core classification: keyword, phase, confidence, reasoning
   - Per-source breakdowns: per_source_analyses dict from DeepSeek (5 individual classifications) - persisted to cache for consistent experience
   - Raw collector data: collector_data dict for transparency and debugging
-  - Metadata: timestamp, cache_hit boolean, expires_at timestamp
+  - Metadata: timestamp, cache_hit boolean, expires_at timestamp, query_expansion_applied boolean, expanded_terms list
   - Error tracking: collectors_succeeded count, partial_data boolean, errors list
-- Logging: cache hit/miss, collector completion count, individual collector failures
+- Logging: cache hit/miss, collector completion count, individual collector failures, niche detection, query expansion attempts
 - Database operations: async context managers for cursor management (async with db.execute())
 - Settings access: uses get_settings() cached singleton for configuration
 - Test suite: 12 passing tests covering initialization, cache hit/miss, partial success (3/5, 4/5 collectors), insufficient data (<3 collectors), error handling, JSON serialization (C:\Users\Hp\Desktop\Gartner's Hype Cycle\backend\tests\test_hype_classifier.py)
+- Query expansion test suite: 12 additional passing tests in backend/tests/test_query_expansion.py covering niche detection, DeepSeek integration, collector re-runs, fallback behavior
 - Integration test: backend/test_real_classification.py validates end-to-end workflow with real API calls
 - CRITICAL pattern: return_exceptions=True in asyncio.gather prevents one collector failure from cancelling others
 
@@ -752,6 +785,45 @@ async def analyze(self, keyword: str, collector_data: Dict[str, Any]) -> Dict[st
 - Temperature: Use 0.3 for deterministic classification (vs. 0.7+ for creative text generation)
 - Graceful degradation: Track errors in "errors" field, continue with partial data if ≥3 sources succeed
 
+**11. Niche Query Expansion Pattern (HypeCycleClassifier Pattern)**
+- For niche technologies with low data availability, use LLM to generate broader search terms
+- Detection: Check primary data source metrics (e.g., social mentions_30d < 50 OR mentions_total < 100)
+- Expansion workflow: Generate terms → Re-run subset of collectors → Update results
+- Pattern:
+```python
+async def _expand_query_and_rerun(self, keyword: str, collector_results: Dict, errors: List[str]):
+    # Step 1: Generate expanded terms via LLM
+    analyzer = DeepSeekAnalyzer(api_key=self.settings.deepseek_api_key)
+    expanded_terms = await analyzer.generate_expanded_terms(keyword)
+
+    # Step 2: Re-run applicable collectors (exclude those already using LLM)
+    collectors_to_rerun = {
+        "social": SocialCollector(),
+        "papers": PapersCollector(),
+        "patents": PatentsCollector(),
+        "news": NewsCollector()
+        # Skip FinanceCollector - already uses LLM for ticker discovery
+    }
+
+    # Step 3: Run with expanded_terms parameter
+    tasks = [collector.collect(keyword, expanded_terms=expanded_terms)
+             for collector in collectors_to_rerun.values()]
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+
+    # Step 4: Update collector_results (keep original on failure)
+    for source_name, result in zip(collectors_to_rerun.keys(), results):
+        if not isinstance(result, Exception):
+            collector_results[source_name] = result
+
+    return collector_results, errors, expanded_terms
+```
+- Benefits: Improves data availability for niche technologies (+2,626% papers, +983% patents verified), maintains quality for mainstream technologies (no expansion triggered)
+- Term generation: Use temperature 0.4 for diversity, validate against generic terms list, require 3-5 terms
+- Selective application: Only re-run collectors that benefit from term expansion (exclude those with existing LLM mapping)
+- Transparent metadata: Track query_expansion_applied boolean and expanded_terms list in response and database
+- Fallback behavior: On expansion failure, continue with original collector results
+- Example: "plant cell culture" → ["plant tissue culture", "in vitro propagation", "micropropagation", "callus culture", "somatic embryogenesis"]
+
 ## Project Structure Reference
 
 ```
@@ -790,8 +862,10 @@ C:\Users\Hp\Desktop\Gartner's Hype Cycle\
 │   │   ├── test_news_collector.py    # NewsCollector tests (16 tests)
 │   │   ├── test_finance_collector.py # FinanceCollector tests (17 tests)
 │   │   ├── test_deepseek_analyzer.py # DeepSeekAnalyzer tests (20 tests)
-│   │   └── test_hype_classifier.py   # HypeCycleClassifier tests (12 tests)
+│   │   ├── test_hype_classifier.py   # HypeCycleClassifier tests (12 tests)
+│   │   └── test_query_expansion.py   # Query expansion tests (12 tests)
 │   ├── test_real_classification.py  # Integration test for end-to-end workflow
+│   ├── test_expansion_comparison.py # Query expansion validation script (compares before/after metrics)
 │   ├── venv/                    # Python virtual environment (gitignored)
 │   ├── requirements.txt         # Python dependencies
 │   ├── .env.example             # Environment variable template
@@ -822,9 +896,11 @@ The analyses table stores cached results:
 - reasoning: LLM explanation text
 - social_data, papers_data, patents_data, news_data, finance_data: JSON blobs from collectors
 - per_source_analyses_data: JSON blob containing per-source LLM analyses (5 individual classifications)
+- **query_expansion_applied**: INTEGER (0=False, 1=True) indicating whether query expansion was used for this analysis
+- **expanded_terms_data**: TEXT storing JSON array of expanded search terms (e.g., ["plant tissue culture", "in vitro propagation", "micropropagation"])
 - expires_at: Cache expiration timestamp (default: 24 hours)
 
-Note: The per_source_analyses_data column was added via idempotent migration in database.py init_db() function. The migration checks for column existence using PRAGMA table_info and only runs ALTER TABLE if needed.
+Note: The per_source_analyses_data, query_expansion_applied, and expanded_terms_data columns were added via idempotent migrations in database.py init_db() function (lines 34-47). The migration checks for column existence using PRAGMA table_info and only runs ALTER TABLE if needed.
 
 ### CORS Configuration
 

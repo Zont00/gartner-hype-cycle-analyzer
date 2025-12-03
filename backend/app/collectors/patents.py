@@ -4,7 +4,7 @@ Gathers patent filing signals, assignee diversity, geographical distribution,
 and innovation velocity metrics for technology keywords.
 """
 from datetime import datetime
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 from urllib.parse import quote
 import httpx
 import json
@@ -19,9 +19,9 @@ class PatentsCollector(BaseCollector):
     API_URL = "https://search.patentsview.org/api/v1/patent/"
     TIMEOUT = 30.0
 
-    async def collect(self, keyword: str) -> Dict[str, Any]:
+    async def collect(self, keyword: str, expanded_terms: Optional[List[str]] = None) -> Dict[str, Any]:
         """
-        Collect patent data for the given keyword.
+        Collect patent data for the given keyword, optionally with expanded search terms.
 
         Queries the PatentsView Search API across three time periods
         (2 years, 5 years, 10 years) to analyze patent filing trends,
@@ -71,13 +71,13 @@ class PatentsCollector(BaseCollector):
             async with httpx.AsyncClient(timeout=self.TIMEOUT) as client:
                 # Fetch data for each time period
                 data_2y = await self._fetch_period(
-                    client, keyword, year_2y_start, year_2y_end, errors
+                    client, keyword, year_2y_start, year_2y_end, errors, expanded_terms
                 )
                 data_5y = await self._fetch_period(
-                    client, keyword, year_5y_start, year_5y_end, errors
+                    client, keyword, year_5y_start, year_5y_end, errors, expanded_terms
                 )
                 data_10y = await self._fetch_period(
-                    client, keyword, year_10y_start, year_10y_end, errors
+                    client, keyword, year_10y_start, year_10y_end, errors, expanded_terms
                 )
 
                 # If all requests failed, return error state
@@ -251,10 +251,13 @@ class PatentsCollector(BaseCollector):
         keyword: str,
         year_start: int,
         year_end: int,
-        errors: List[str]
+        errors: List[str],
+        expanded_terms: Optional[List[str]] = None
     ) -> Dict[str, Any] | None:
         """
         Fetch PatentsView data for a specific time period.
+
+        When expanded_terms is provided, constructs OR query matching keyword OR any expanded term.
 
         Args:
             client: Async HTTP client
@@ -262,6 +265,7 @@ class PatentsCollector(BaseCollector):
             year_start: Start year (inclusive)
             year_end: End year (inclusive)
             errors: List to append error messages to
+            expanded_terms: Optional list of related search terms
 
         Returns:
             API response dict or None if request failed
@@ -272,20 +276,39 @@ class PatentsCollector(BaseCollector):
             date_end = f"{year_end}-12-31"
 
             # Build query using _text_all for keyword matching (ensures ALL words present)
-            # Search in both title and abstract with _or
-            # Note: API uses patent_id not patent_number
-            query = {
-                "_and": [
-                    {
+            # Search in both title and abstract
+            if expanded_terms:
+                # With expanded terms: create OR clause for each term (keyword + expanded)
+                text_clauses = []
+                for term in [keyword] + expanded_terms:
+                    text_clauses.append({
                         "_or": [
-                            {"_text_all": {"patent_title": keyword}},
-                            {"_text_all": {"patent_abstract": keyword}}
+                            {"_text_all": {"patent_title": term}},
+                            {"_text_all": {"patent_abstract": term}}
                         ]
-                    },
-                    {"_gte": {"patent_date": date_start}},
-                    {"_lte": {"patent_date": date_end}}
-                ]
-            }
+                    })
+
+                query = {
+                    "_and": [
+                        {"_or": text_clauses},  # Match ANY of the terms
+                        {"_gte": {"patent_date": date_start}},
+                        {"_lte": {"patent_date": date_end}}
+                    ]
+                }
+            else:
+                # Original behavior: single keyword
+                query = {
+                    "_and": [
+                        {
+                            "_or": [
+                                {"_text_all": {"patent_title": keyword}},
+                                {"_text_all": {"patent_abstract": keyword}}
+                            ]
+                        },
+                        {"_gte": {"patent_date": date_start}},
+                        {"_lte": {"patent_date": date_end}}
+                    ]
+                }
 
             # Fields to retrieve (use patent_id not patent_number)
             # Citation field: patent_num_times_cited_by_us_patents

@@ -436,3 +436,118 @@ Return ONLY a JSON object with no markdown formatting:
                 raise ValueError(f"Confidence must be float between 0-1. Got: {confidence}")
 
             return parsed
+
+    async def generate_expanded_terms(self, keyword: str) -> List[str]:
+        """
+        Generate 3-5 related/broader search terms for a niche technology keyword.
+
+        Uses DeepSeek LLM to expand queries for technologies with low data availability.
+        Validates terms to reject generic words like "technology" or "system".
+
+        Args:
+            keyword: Original technology keyword (e.g., "plant cell culture")
+
+        Returns:
+            List of 3-5 related search terms (e.g., ["plant tissue culture", "in vitro propagation", "micropropagation"])
+
+        Raises:
+            httpx.HTTPStatusError: For HTTP errors (401, 429, etc.)
+            httpx.TimeoutException: For request timeouts
+            json.JSONDecodeError: For invalid JSON responses
+            ValueError: For invalid response structure
+        """
+        prompt = f"""You are a technology research assistant helping expand search queries for niche technologies.
+
+Given the technology keyword: "{keyword}"
+
+Generate 3-5 related or broader search terms that would help find more relevant information about this technology. The terms should be:
+- Closely related to the original keyword (synonyms, broader categories, related concepts)
+- Specific enough to be useful (avoid generic terms like "technology", "system", "innovation", "solution")
+- Likely to appear in research papers, patents, news articles, and technical discussions
+- Different from each other (don't just add/remove words from the same phrase)
+
+Examples:
+- "CRISPR base editing" → ["base editor", "adenine base editor", "cytosine base editor", "prime editing", "genome editing"]
+- "plant cell culture" → ["plant tissue culture", "in vitro propagation", "micropropagation", "callus culture", "somatic embryogenesis"]
+- "quantum annealing" → ["quantum optimization", "D-Wave", "adiabatic quantum computing", "quantum approximate optimization"]
+
+Return ONLY a JSON object with no markdown formatting:
+{{"terms": ["term1", "term2", "term3", "term4", "term5"]}}
+
+Include 3-5 terms. Do not include the original keyword in the list."""
+
+        headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json"
+        }
+
+        payload = {
+            "model": "deepseek-chat",
+            "messages": [
+                {"role": "user", "content": prompt}
+            ],
+            "temperature": 0.4  # Slightly higher for diversity, but still deterministic
+        }
+
+        async with httpx.AsyncClient(timeout=self.TIMEOUT) as client:
+            response = await client.post(
+                self.API_URL,
+                headers=headers,
+                json=payload
+            )
+            response.raise_for_status()
+
+            result = response.json()
+            content = result["choices"][0]["message"]["content"]
+
+            # Strip markdown code blocks
+            content = content.strip()
+            if content.startswith("```"):
+                content = content.split("```")[1]
+                if content.startswith("json"):
+                    content = content[4:]
+            content = content.strip()
+
+            # Parse JSON
+            parsed = json.loads(content)
+
+            # Validate response structure
+            if "terms" not in parsed:
+                raise ValueError(f"DeepSeek response missing 'terms' field. Got: {list(parsed.keys())}")
+
+            terms = parsed["terms"]
+            if not isinstance(terms, list):
+                raise ValueError(f"'terms' must be a list. Got: {type(terms)}")
+
+            if not 3 <= len(terms) <= 5:
+                raise ValueError(f"Expected 3-5 terms, got {len(terms)}")
+
+            # Validate each term (reject generic terms)
+            generic_terms = {
+                "technology", "system", "innovation", "solution", "product",
+                "service", "platform", "tool", "device", "method", "process",
+                "technique", "approach", "framework", "application"
+            }
+
+            validated_terms = []
+            for term in terms:
+                if not isinstance(term, str) or not term.strip():
+                    continue  # Skip empty or non-string terms
+
+                term_lower = term.strip().lower()
+
+                # Reject if it's just a generic term
+                if term_lower in generic_terms:
+                    continue
+
+                # Reject if it's identical to the original keyword (case-insensitive)
+                if term_lower == keyword.lower():
+                    continue
+
+                validated_terms.append(term.strip())
+
+            # Ensure we have at least 3 valid terms
+            if len(validated_terms) < 3:
+                raise ValueError(f"Only {len(validated_terms)} valid terms after validation. Need at least 3.")
+
+            return validated_terms[:5]  # Cap at 5 terms
