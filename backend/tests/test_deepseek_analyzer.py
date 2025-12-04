@@ -439,7 +439,8 @@ async def test_deepseek_analyzer_invalid_json():
     mock_response.raise_for_status = Mock()
 
     with patch("httpx.AsyncClient.post", return_value=mock_response):
-        with pytest.raises(json.JSONDecodeError):
+        # Now raises ValueError with better error message instead of bare JSONDecodeError
+        with pytest.raises(ValueError, match="Failed to parse DeepSeek response"):
             await analyzer._analyze_source("social", social_data, "test tech")
 
 
@@ -526,6 +527,144 @@ async def test_deepseek_analyzer_markdown_stripping():
 
         assert result["phase"] == "peak"
         assert result["confidence"] == 0.75
+
+
+@pytest.mark.asyncio
+async def test_deepseek_analyzer_bare_json():
+    """Test handling of bare JSON without markdown wrapping"""
+    analyzer = DeepSeekAnalyzer(api_key="test-key")
+
+    social_data = {"mentions_30d": 100}
+
+    # Bare JSON without markdown
+    mock_response = Mock()
+    mock_response.json.return_value = {
+        "choices": [
+            {"message": {"content": '{"phase": "trough", "confidence": 0.65, "reasoning": "Bare JSON test"}'}}
+        ]
+    }
+    mock_response.raise_for_status = Mock()
+
+    with patch("httpx.AsyncClient.post", return_value=mock_response):
+        result = await analyzer._analyze_source("social", social_data, "test tech")
+
+        assert result["phase"] == "trough"
+        assert result["confidence"] == 0.65
+
+
+@pytest.mark.asyncio
+async def test_deepseek_analyzer_markdown_without_language():
+    """Test markdown code block without 'json' language identifier"""
+    analyzer = DeepSeekAnalyzer(api_key="test-key")
+
+    social_data = {"mentions_30d": 100}
+
+    # Markdown without 'json' identifier
+    mock_response = Mock()
+    mock_response.json.return_value = {
+        "choices": [
+            {"message": {"content": '```\n{"phase": "slope", "confidence": 0.70, "reasoning": "No language tag"}\n```'}}
+        ]
+    }
+    mock_response.raise_for_status = Mock()
+
+    with patch("httpx.AsyncClient.post", return_value=mock_response):
+        result = await analyzer._analyze_source("social", social_data, "test tech")
+
+        assert result["phase"] == "slope"
+        assert result["confidence"] == 0.70
+
+
+@pytest.mark.asyncio
+async def test_deepseek_analyzer_text_after_closing_backticks():
+    """Test handling of text after closing markdown backticks"""
+    analyzer = DeepSeekAnalyzer(api_key="test-key")
+
+    social_data = {"mentions_30d": 100}
+
+    # Text after closing backticks (was problematic with old string splitting)
+    mock_response = Mock()
+    mock_response.json.return_value = {
+        "choices": [
+            {"message": {"content": '```json\n{"phase": "plateau", "confidence": 0.80, "reasoning": "With trailing text"}\n```\nHere is my explanation of the analysis.'}}
+        ]
+    }
+    mock_response.raise_for_status = Mock()
+
+    with patch("httpx.AsyncClient.post", return_value=mock_response):
+        result = await analyzer._analyze_source("social", social_data, "test tech")
+
+        assert result["phase"] == "plateau"
+        assert result["confidence"] == 0.80
+
+
+@pytest.mark.asyncio
+async def test_deepseek_analyzer_multiple_code_blocks():
+    """Test handling of multiple code blocks (grabs first JSON)"""
+    analyzer = DeepSeekAnalyzer(api_key="test-key")
+
+    social_data = {"mentions_30d": 100}
+
+    # Multiple code blocks (old splitting would fail)
+    mock_response = Mock()
+    mock_response.json.return_value = {
+        "choices": [
+            {"message": {"content": 'Some text ```json\n{"phase": "innovation_trigger", "confidence": 0.55, "reasoning": "First block"}\n``` more text ```json\n{"invalid": "second"}\n```'}}
+        ]
+    }
+    mock_response.raise_for_status = Mock()
+
+    with patch("httpx.AsyncClient.post", return_value=mock_response):
+        result = await analyzer._analyze_source("social", social_data, "test tech")
+
+        assert result["phase"] == "innovation_trigger"
+        assert result["confidence"] == 0.55
+
+
+@pytest.mark.asyncio
+async def test_deepseek_analyzer_malformed_json_with_logging(caplog):
+    """Test error logging when JSON is malformed"""
+    analyzer = DeepSeekAnalyzer(api_key="test-key")
+
+    social_data = {"mentions_30d": 100}
+
+    # Invalid JSON
+    mock_response = Mock()
+    mock_response.json.return_value = {
+        "choices": [
+            {"message": {"content": '{"phase": "peak", "confidence": 0.75, "reasoning": "Missing closing brace"'}}
+        ]
+    }
+    mock_response.raise_for_status = Mock()
+
+    with patch("httpx.AsyncClient.post", return_value=mock_response):
+        with pytest.raises(ValueError, match="Failed to parse DeepSeek response"):
+            await analyzer._analyze_source("social", social_data, "test tech")
+
+        # Verify logging occurred
+        assert "Failed to parse DeepSeek JSON response" in caplog.text
+        assert "Raw content:" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_deepseek_analyzer_no_json_content():
+    """Test error when no JSON content found in response"""
+    analyzer = DeepSeekAnalyzer(api_key="test-key")
+
+    social_data = {"mentions_30d": 100}
+
+    # No JSON in response
+    mock_response = Mock()
+    mock_response.json.return_value = {
+        "choices": [
+            {"message": {"content": 'This is just plain text with no JSON at all.'}}
+        ]
+    }
+    mock_response.raise_for_status = Mock()
+
+    with patch("httpx.AsyncClient.post", return_value=mock_response):
+        with pytest.raises(ValueError, match="Failed to parse DeepSeek response"):
+            await analyzer._analyze_source("social", social_data, "test tech")
 
 
 @pytest.mark.asyncio
