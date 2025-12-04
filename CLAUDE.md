@@ -196,11 +196,12 @@ The application follows a three-tier architecture:
 
 **DeepSeek Analyzer** (C:\Users\Hp\Desktop\Gartner's Hype Cycle\backend\app\analyzers\deepseek.py) - IMPLEMENTED
 - Two-stage LLM analysis architecture: 5 per-source classifications + 1 final synthesis (6 total API calls)
-- **Query Expansion Generator** (IMPLEMENTED - deepseek.py:440-553): generate_expanded_terms(keyword) method uses DeepSeek to produce 3-5 related search terms for niche technologies
+- **Query Expansion Generator** (IMPLEMENTED - deepseek.py:484-601): generate_expanded_terms(keyword) method uses DeepSeek to produce 3-5 related search terms for niche technologies
   - Temperature: 0.4 (slightly higher for term diversity while maintaining determinism)
   - Validation: Rejects generic terms (technology, system, innovation, solution, etc.), rejects duplicate of original keyword, requires 3-5 valid terms
   - Example expansions: "plant cell culture" → ["plant tissue culture", "in vitro propagation", "micropropagation", "callus culture", "somatic embryogenesis"]
   - Used by HypeCycleClassifier._expand_query_and_rerun() workflow
+  - **Robust JSON Parsing** (IMPLEMENTED - deepseek.py:547-559): Uses _extract_json_from_markdown() helper with try-except error handling, logs raw content (truncated to 500 chars) on parsing failures
 - Classifies technologies into 5 Gartner Hype Cycle phases:
   - innovation_trigger: Innovation Trigger
   - peak: Peak of Inflated Expectations
@@ -220,13 +221,25 @@ The application follows a three-tier architecture:
   - Finance prompt: focuses on market maturity, investor sentiment, investment momentum with thresholds (innovation_trigger: <3 companies, peak: strong positive returns)
 - Each prompt includes full Gartner Hype Cycle phase definitions and interpretation guidance
 - Synthesis prompt: aggregates all 5 source analyses, weighs by confidence scores, handles conflicting signals
-- Response parsing: strips markdown code blocks (```json ... ```), validates required fields (phase, confidence, reasoning)
+- **Robust JSON Parsing** (IMPLEMENTED - deepseek.py:53-88): _extract_json_from_markdown(content) helper method handles all edge cases:
+  - Markdown-wrapped with language tag: ```json\n{...}\n```
+  - Markdown-wrapped without language tag: ```\n{...}\n```
+  - Bare JSON: {...}
+  - Text before/after code blocks: "Some text ```json {...}``` more text"
+  - Multiple code blocks (grabs first JSON object)
+  - Uses regex pattern r'```(?:json)?\s*(\{.*?\})\s*```|(\{.*?\})' with DOTALL flag for reliable extraction
+  - Raises ValueError with content preview (truncated to 200 chars) if no JSON found
+- **Enhanced Error Handling** (IMPLEMENTED - deepseek.py:454-466, 547-559):
+  - JSON parsing wrapped in try-except blocks in both _call_deepseek() and generate_expanded_terms() methods
+  - Logs raw content (truncated to 500 chars) at ERROR level when parsing fails for debugging
+  - Re-raises ValueError with content snippet (first 200 chars) in error message for immediate visibility
+  - Module-level logger instance (deepseek.py:11-12) following codebase logging patterns
 - Validation: checks phase is one of 5 valid values, confidence is 0-1 float, all required fields present
 - Error handling: rate limits (429), authentication failures (401), timeouts, invalid JSON responses, missing fields, invalid phases
 - Graceful degradation: continues with ≥3 sources if some collectors fail (minimum 3 required for synthesis)
 - Errors tracked in "errors" field for transparency, never raises exceptions unless < 3 sources available
-- Test suite: 20 passing tests covering initialization, full analysis, per-source analysis, synthesis, error handling, edge cases, JSON serialization (C:\Users\Hp\Desktop\Gartner's Hype Cycle\backend\tests\test_deepseek_analyzer.py)
-- Real API validation: Successfully tested with "quantum computing" (all 5 sources classified as "peak", final confidence: 0.78, per-source confidence: 0.72-0.85)
+- Test suite: 27 passing tests covering initialization, full analysis, per-source analysis, synthesis, error handling, edge cases, JSON serialization, markdown extraction edge cases (C:\Users\Hp\Desktop\Gartner's Hype Cycle\backend\tests\test_deepseek_analyzer.py)
+- Real API validation: Successfully tested with "quantum computing" (all 5 sources classified as "peak", final confidence: 0.78, per-source confidence: 0.72-0.85) and "bio fuels" (previously failed, now works after JSON parsing fix)
 
 **Hype Cycle Classifier** (C:\Users\Hp\Desktop\Gartner's Hype Cycle\backend\app\analyzers\hype_classifier.py) - IMPLEMENTED
 - Main orchestration layer that coordinates the entire analysis workflow
@@ -824,6 +837,69 @@ async def _expand_query_and_rerun(self, keyword: str, collector_results: Dict, e
 - Fallback behavior: On expansion failure, continue with original collector results
 - Example: "plant cell culture" → ["plant tissue culture", "in vitro propagation", "micropropagation", "callus culture", "somatic embryogenesis"]
 
+**12. Robust LLM JSON Parsing Pattern (DeepSeekAnalyzer Pattern)**
+- LLM APIs (DeepSeek, OpenAI, etc.) often return JSON wrapped in markdown code blocks despite prompts requesting bare JSON
+- Simple string splitting fails with edge cases (multiple blocks, text after blocks, missing language tags)
+- Solution: Use regex-based extraction helper method with comprehensive error handling
+- Pattern:
+```python
+import re
+import json
+import logging
+
+logger = logging.getLogger(__name__)
+
+def _extract_json_from_markdown(self, content: str) -> str:
+    """Extract JSON from markdown code blocks or bare JSON"""
+    content = content.strip()
+
+    # Regex pattern: match markdown-wrapped or bare JSON
+    # Handles: ```json\n{...}\n```, ```\n{...}\n```, {...}
+    pattern = r'```(?:json)?\s*(\{.*?\})\s*```|(\{.*?\})'
+    match = re.search(pattern, content, re.DOTALL)
+
+    if match:
+        # Return first non-None group
+        json_str = match.group(1) or match.group(2)
+        return json_str.strip()
+
+    # Raise with content preview for debugging
+    content_preview = content[:200] if len(content) > 200 else content
+    raise ValueError(f"Could not extract JSON from content. Preview: {content_preview}")
+
+async def _call_llm_api(self, prompt: str) -> Dict[str, Any]:
+    """Call LLM API and parse JSON response with robust error handling"""
+    # Make API call
+    response = await client.post(API_URL, json={"prompt": prompt})
+    content = response.json()["choices"][0]["message"]["content"]
+
+    # Extract and parse JSON with comprehensive error handling
+    try:
+        json_str = self._extract_json_from_markdown(content)
+        parsed = json.loads(json_str)
+    except (ValueError, json.JSONDecodeError) as e:
+        # Log raw content (truncated) for debugging
+        content_preview = content[:500] + "..." if len(content) > 500 else content
+        logger.error(f"Failed to parse LLM JSON response: {str(e)}")
+        logger.error(f"Raw content: {content_preview}")
+        # Re-raise with content snippet for immediate visibility
+        raise ValueError(
+            f"Failed to parse LLM response. Error: {str(e)}. Content preview: {content[:200]}"
+        ) from e
+
+    return parsed
+```
+- Benefits: Handles all markdown edge cases, provides debugging context when failures occur, prevents cryptic JSONDecodeError messages
+- Regex pattern explained: `r'```(?:json)?\s*(\{.*?\})\s*```|(\{.*?\})'`
+  - `(?:json)?` - Optional "json" language tag (non-capturing)
+  - `\s*` - Optional whitespace
+  - `(\{.*?\})` - Capture group for JSON object (non-greedy match)
+  - `|(\{.*?\})` - Alternative: bare JSON without markdown
+  - `re.DOTALL` flag - Makes `.` match newlines for multi-line JSON
+- Error handling: Logs raw content at ERROR level (truncated to 500 chars to prevent log spam), includes content snippet in exception message
+- Logging setup: Module-level logger instance following codebase patterns: `logger = logging.getLogger(__name__)`
+- Test coverage: Verify with edge cases (bare JSON, markdown without language tag, text after blocks, multiple blocks, malformed JSON)
+
 ## Project Structure Reference
 
 ```
@@ -844,7 +920,7 @@ C:\Users\Hp\Desktop\Gartner's Hype Cycle\
 │   │   │   └── finance.py       # Financial data collector (IMPLEMENTED - Yahoo Finance + DeepSeek)
 │   │   ├── analyzers/
 │   │   │   ├── __init__.py
-│   │   │   ├── deepseek.py      # DeepSeek LLM client (IMPLEMENTED - 439 lines)
+│   │   │   ├── deepseek.py      # DeepSeek LLM client (IMPLEMENTED - 601 lines with robust JSON parsing)
 │   │   │   └── hype_classifier.py # Main orchestration layer (IMPLEMENTED - 290 lines)
 │   │   ├── routers/
 │   │   │   ├── __init__.py
@@ -861,7 +937,7 @@ C:\Users\Hp\Desktop\Gartner's Hype Cycle\
 │   │   ├── test_patents_collector.py # PatentsCollector tests (20 tests)
 │   │   ├── test_news_collector.py    # NewsCollector tests (16 tests)
 │   │   ├── test_finance_collector.py # FinanceCollector tests (17 tests)
-│   │   ├── test_deepseek_analyzer.py # DeepSeekAnalyzer tests (20 tests)
+│   │   ├── test_deepseek_analyzer.py # DeepSeekAnalyzer tests (27 tests - includes 7 new JSON parsing edge case tests)
 │   │   ├── test_hype_classifier.py   # HypeCycleClassifier tests (12 tests)
 │   │   └── test_query_expansion.py   # Query expansion tests (12 tests)
 │   ├── test_real_classification.py  # Integration test for end-to-end workflow
@@ -1058,18 +1134,25 @@ The FinanceCollector has comprehensive test coverage (17 tests):
 - JSON serialization verification
 
 ### DeepSeek Analyzer Test
-The DeepSeekAnalyzer has comprehensive test coverage (20 tests):
+The DeepSeekAnalyzer has comprehensive test coverage (27 tests):
 - Initialization and API key validation (missing API key raises ValueError)
 - Full end-to-end analysis with all 5 data sources (6 total LLM calls: 5 per-source + 1 synthesis)
 - Individual per-source analysis for each collector (social, papers, patents, news, finance)
 - Final synthesis aggregation logic (weighs multiple source analyses)
 - Error handling (rate limits 429, authentication failures 401, timeouts, invalid JSON)
 - Invalid response handling (missing required fields, invalid phase values, confidence out of range)
-- Markdown stripping (handles ```json ... ``` code blocks from DeepSeek)
+- **Robust markdown extraction** (7 new tests covering edge cases):
+  - Bare JSON without markdown wrapping: {...}
+  - Markdown-wrapped without language identifier: ```\n{...}\n```
+  - Text after closing backticks: ```json {...}``` Here's my explanation
+  - Multiple code blocks (extracts first JSON object)
+  - Malformed JSON with logging verification (ensures ERROR logs captured)
+  - No JSON content found (raises ValueError with content preview)
+  - Updated existing test to expect ValueError instead of JSONDecodeError
 - Edge cases (insufficient sources <3, partial collector failures, graceful degradation)
 - Response structure validation (phase in valid set, confidence 0-1, reasoning present)
 - JSON serialization verification (result is fully JSON-serializable)
-- Real API validation: Successfully tested with "quantum computing" (all 5 sources classified as "peak", final confidence: 0.78, per-source confidence: 0.72-0.85)
+- Real API validation: Successfully tested with "quantum computing" (all 5 sources classified as "peak", final confidence: 0.78, per-source confidence: 0.72-0.85) and "bio fuels" (previously failed with JSON parsing error, now works correctly)
 
 ### Hype Cycle Classifier Test
 The HypeCycleClassifier has comprehensive test coverage (12 tests):

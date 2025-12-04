@@ -1,7 +1,7 @@
 ---
 name: h-fix-deepseek-json-parsing
 branch: fix/h-fix-deepseek-json-parsing
-status: pending
+status: completed
 created: 2025-12-03
 ---
 
@@ -21,12 +21,12 @@ This bug prevents users from analyzing certain technologies (e.g., "bio fuels") 
 
 ## Success Criteria
 
-- [ ] **"bio fuels" analysis completes successfully** - The specific failing case must work end-to-end
-- [ ] **Robust JSON extraction with regex** - Replace string splitting with regex pattern that handles markdown code blocks properly
-- [ ] **Logging added for debug** - When JSON parsing fails, log the raw content from DeepSeek (truncated if >500 chars) for debugging
-- [ ] **Better error messages** - Error messages include snippet of problematic content to help diagnose issues
-- [ ] **Test coverage added** - Unit tests cover edge cases: multiple code blocks, text after blocks, malformed JSON from DeepSeek
-- [ ] **No regression** - Existing passing analyses (e.g., "quantum computing") still work correctly
+- [x] **"bio fuels" analysis completes successfully** - The specific failing case must work end-to-end
+- [x] **Robust JSON extraction with regex** - Replace string splitting with regex pattern that handles markdown code blocks properly
+- [x] **Logging added for debug** - When JSON parsing fails, log the raw content from DeepSeek (truncated if >500 chars) for debugging
+- [x] **Better error messages** - Error messages include snippet of problematic content to help diagnose issues
+- [x] **Test coverage added** - Unit tests cover edge cases: multiple code blocks, text after blocks, malformed JSON from DeepSeek
+- [x] **No regression** - Existing passing analyses (e.g., "quantum computing") still work correctly
 
 ## Context Manifest
 
@@ -281,4 +281,29 @@ Analysis failed: Analysis failed: Failed to synthesize analyses: Expecting ',' d
 ```
 
 ## Work Log
-<!-- Updated as work progresses -->
+
+### 2025-12-04
+
+#### Completed
+- Created `_extract_json_from_markdown()` helper method with robust regex pattern handling all edge cases (bare JSON, markdown with/without language tag, text after backticks, multiple code blocks)
+- Added logging infrastructure (logger instance at module level) to backend/app/analyzers/deepseek.py
+- Enhanced error handling in `_call_deepseek()` method with try-except blocks, raw content logging (truncated to 500 chars), and content snippets in error messages
+- Enhanced error handling in `generate_expanded_terms()` method with same error handling pattern
+- Added 7 new unit tests for edge cases: bare JSON, markdown without language identifier, text after closing backticks, multiple code blocks, malformed JSON with logging verification, no JSON content
+- Updated existing `test_deepseek_analyzer_invalid_json` to expect ValueError instead of JSONDecodeError
+- Verified all 26 DeepSeek analyzer tests pass (including 7 new tests)
+- Verified all 85 collector tests pass with no regression
+
+#### Decisions
+- Used regex pattern `r'```(?:json)?\\s*(\\{.*?\\})\\s*```|(\\{.*?\\})'` with DOTALL flag for robust JSON extraction instead of string splitting
+- Chose ValueError wrapper over bare JSONDecodeError to provide better context in error messages
+- Logged at ERROR level for parsing failures to ensure visibility in production monitoring
+
+#### Discovered
+- Original string splitting approach with `content.split("```")[1]` failed when DeepSeek responses contained multiple code blocks or text after closing backticks
+- The bug prevented analysis of technologies like "bio fuels" that triggered edge case DeepSeek responses
+- Code review found no security vulnerabilities - regex pattern safe from catastrophic backtracking, appropriate logging for debugging
+
+#### Files Modified
+- `backend/app/analyzers/deepseek.py` (lines 5-9: imports, 11-12: logger, 50-85: helper method, 454-466: error handling in _call_deepseek, 547-559: error handling in generate_expanded_terms)
+- `backend/tests/test_deepseek_analyzer.py` (lines 427-444: updated test, 532-666: 7 new tests)

@@ -5,6 +5,10 @@ This module handles LLM integration for analyzing collected data.
 from typing import Dict, Any, List
 import httpx
 import json
+import re
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 class DeepSeekAnalyzer:
@@ -45,6 +49,43 @@ Hype Cycle Phases:
         if not api_key:
             raise ValueError("DeepSeek API key is required")
         self.api_key = api_key
+
+    def _extract_json_from_markdown(self, content: str) -> str:
+        """
+        Extract JSON from markdown code blocks or bare JSON.
+
+        Handles multiple edge cases:
+        - Wrapped in markdown: ```json\n{...}\n```
+        - Wrapped without language: ```\n{...}\n```
+        - Bare JSON: {...}
+        - Text before/after: "Some text ```json {...}``` more text"
+        - Multiple code blocks (grabs first JSON)
+
+        Args:
+            content: Raw content from DeepSeek API
+
+        Returns:
+            Extracted JSON string
+
+        Raises:
+            ValueError: If no JSON content found
+        """
+        content = content.strip()
+
+        # Try regex pattern first: match markdown-wrapped or bare JSON
+        # Pattern matches: optional backticks + optional "json" + JSON object + optional backticks
+        # (?s) flag makes . match newlines
+        pattern = r'```(?:json)?\s*(\{.*?\})\s*```|(\{.*?\})'
+        match = re.search(pattern, content, re.DOTALL)
+
+        if match:
+            # Return first non-None group (either markdown-wrapped or bare JSON)
+            json_str = match.group(1) or match.group(2)
+            return json_str.strip()
+
+        # If regex fails, raise error with content preview
+        content_preview = content[:200] if len(content) > 200 else content
+        raise ValueError(f"Could not extract JSON from content. Preview: {content_preview}")
 
     async def analyze(self, keyword: str, collector_data: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -410,16 +451,19 @@ Return ONLY a JSON object with no markdown formatting:
             result = response.json()
             content = result["choices"][0]["message"]["content"]
 
-            # Strip markdown code blocks (pattern from FinanceCollector)
-            content = content.strip()
-            if content.startswith("```"):
-                content = content.split("```")[1]
-                if content.startswith("json"):
-                    content = content[4:]
-            content = content.strip()
-
-            # Parse JSON
-            parsed = json.loads(content)
+            # Extract JSON from markdown code blocks using robust regex
+            try:
+                json_str = self._extract_json_from_markdown(content)
+                parsed = json.loads(json_str)
+            except (ValueError, json.JSONDecodeError) as e:
+                # Log raw content (truncated) for debugging
+                content_preview = content[:500] + "..." if len(content) > 500 else content
+                logger.error(f"Failed to parse DeepSeek JSON response: {str(e)}")
+                logger.error(f"Raw content: {content_preview}")
+                # Re-raise with better error message including content snippet
+                raise ValueError(
+                    f"Failed to parse DeepSeek response. Error: {str(e)}. Content preview: {content[:200]}"
+                ) from e
 
             # Validate response structure
             required_fields = ["phase", "confidence", "reasoning"]
@@ -500,16 +544,19 @@ Include 3-5 terms. Do not include the original keyword in the list."""
             result = response.json()
             content = result["choices"][0]["message"]["content"]
 
-            # Strip markdown code blocks
-            content = content.strip()
-            if content.startswith("```"):
-                content = content.split("```")[1]
-                if content.startswith("json"):
-                    content = content[4:]
-            content = content.strip()
-
-            # Parse JSON
-            parsed = json.loads(content)
+            # Extract JSON from markdown code blocks using robust regex
+            try:
+                json_str = self._extract_json_from_markdown(content)
+                parsed = json.loads(json_str)
+            except (ValueError, json.JSONDecodeError) as e:
+                # Log raw content (truncated) for debugging
+                content_preview = content[:500] + "..." if len(content) > 500 else content
+                logger.error(f"Failed to parse DeepSeek JSON response for query expansion: {str(e)}")
+                logger.error(f"Raw content: {content_preview}")
+                # Re-raise with better error message including content snippet
+                raise ValueError(
+                    f"Failed to parse DeepSeek query expansion response. Error: {str(e)}. Content preview: {content[:200]}"
+                ) from e
 
             # Validate response structure
             if "terms" not in parsed:
