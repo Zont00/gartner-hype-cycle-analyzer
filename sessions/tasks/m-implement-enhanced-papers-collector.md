@@ -1,7 +1,7 @@
 ---
 name: m-implement-enhanced-papers-collector
 branch: feature/m-implement-enhanced-papers-collector
-status: pending
+status: in-progress
 created: 2025-12-09
 ---
 

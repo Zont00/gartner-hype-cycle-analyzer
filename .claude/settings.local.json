@@ -14,7 +14,9 @@
       "Bash(python -m pip install:*)",
       "Bash(curl:*)",
       "Bash(cat:*)",
-      "Bash(sessions/bin/sessions.bat protocol startup-load sessions/tasks/h-implement-social-collector.md)"
+      "Bash(sessions/bin/sessions.bat protocol startup-load sessions/tasks/h-implement-social-collector.md)",
+      "WebSearch",
+      "WebFetch(domain:medium.com)"
     ],
     "deny": [],
     "ask": []
