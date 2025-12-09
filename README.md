@@ -85,7 +85,7 @@ backend/
     utils/            # Shared utilities
   tests/              # Test suite
     test_social_collector.py  # 14 tests for SocialCollector
-    test_papers_collector.py  # 18 tests for PapersCollector
+    test_papers_collector.py  # 25 tests for PapersCollector
     test_patents_collector.py # 20 tests for PatentsCollector
     test_news_collector.py    # 16 tests for NewsCollector
     test_finance_collector.py # 17 tests for FinanceCollector
@@ -259,7 +259,7 @@ curl -X POST http://localhost:8000/api/analyze \
 
 ### Test Coverage
 - **SocialCollector**: 14 tests covering API integration, error handling, edge cases
-- **PapersCollector**: 18 tests covering API integration, error handling, edge cases, citation metrics, derived insights
+- **PapersCollector**: 25 tests covering API integration, error handling, edge cases, 10y period, author aggregation, paper type distribution, type-aware maturity, citation metrics, derived insights
 - **PatentsCollector**: 20 tests covering API integration, error handling, edge cases, authentication, filing velocity, geographic reach
 - **NewsCollector**: 16 tests covering API integration, error handling, edge cases, sentiment/tone calculation, coverage trends, media attention
 - **FinanceCollector**: 17 tests covering DeepSeek integration, yfinance mocking, error handling, edge cases, market maturity, investor sentiment, instance isolation

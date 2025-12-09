@@ -118,18 +118,27 @@ The application follows a three-tier architecture:
 
 **Research Papers Collector** (C:\Users\Hp\Desktop\Gartner's Hype Cycle\backend\app\collectors\papers.py) - IMPLEMENTED
 - Queries Semantic Scholar API bulk search endpoint (https://api.semanticscholar.org/graph/v1/paper/search/bulk)
-- Time-windowed analysis: 2-year and 5-year periods (suitable for academic publishing cycles)
+- Time-windowed analysis: 2-year, 5-year, and 10-year periods (non-overlapping windows matching academic publishing cycles)
+- Period structure: 2y (current_year-2 to current_year-1), 5y (current_year-7 to current_year-3), 10y (current_year-12 to current_year-8)
 - IMPORTANT: Uses bulk endpoint with quote-wrapped keywords for exact phrase matching (reduces false positives by 99.9%)
 - **Query Expansion Support** (IMPLEMENTED - papers.py:190-274): Constructs OR query with pipe separator (query: "keyword" | "term1" | "term2") per Semantic Scholar syntax
-- Metrics returned: publications_2y, publications_5y, publications_total
-- Citation metrics: avg_citations_2y, avg_citations_5y, citation_velocity
+- Metrics returned: publications_2y, publications_5y, publications_10y, publications_total
+- Citation metrics: avg_citations_2y, avg_citations_5y, avg_citations_10y, avg_influential_citations_2y, avg_influential_citations_5y, avg_influential_citations_10y, citation_velocity
 - Research breadth: author_diversity, venue_diversity
+- Author metrics: top_authors (top 10 by publication count across all periods)
+- **Paper type distribution analysis**: Tracks 5 categories (Review, JournalArticle, Conference, Book, Other) using publicationTypes field
+  - Returns type_counts, type_percentages, papers_with_type_info
+  - 85.6% API coverage validated with real queries
+  - Gracefully handles papers without type data (14.4%)
+- **Enhanced research maturity**: Type-aware classification with thresholds (>30% reviews = mature, >60% conferences + <20 papers = emerging)
+  - Returns maturity level with detailed reasoning: research_maturity_reasoning field explains classification logic
 - Derived insights: research_maturity (emerging/developing/mature), research_momentum (accelerating/steady/decelerating), research_trend (increasing/stable/decreasing), research_breadth (narrow/moderate/broad)
-- Returns top 5 papers by citation count with titles, years, citation counts for LLM context
+- Returns top 5 papers by citation count with titles, years, citation counts, influential citations, author counts, venues for LLM context
 - API key authentication: Optional via x-api-key header (configured through SEMANTIC_SCHOLAR_API_KEY env var)
 - Graceful error handling with safe dictionary access using .get() to prevent KeyError on inconsistent API responses
-- Handles missing fields (citationCount, authors, venue may be null/missing)
-- Test suite: 18 passing tests covering success, errors, edge cases (C:\Users\Hp\Desktop\Gartner's Hype Cycle\backend\tests\test_papers_collector.py)
+- Handles missing fields (citationCount, authors, venue, publicationTypes may be null/missing)
+- Test suite: 25 passing tests covering success, errors, edge cases, 10y period, author aggregation, paper type distribution, type-aware maturity (C:\Users\Hp\Desktop\Gartner's Hype Cycle\backend\tests\test_papers_collector.py)
+- Real API validation: Successfully tested with "quantum computing" (13,336 papers, 79% journal/22% conference/17.5% reviews, top author: George Rajna with 17 papers)
 
 **Patent Collector** (C:\Users\Hp\Desktop\Gartner's Hype Cycle\backend\app\collectors\patents.py) - IMPLEMENTED
 - Queries PatentsView Search API (https://search.patentsview.org/api/v1/patent/)
@@ -450,9 +459,9 @@ class SocialCollector(BaseCollector):
 ```
 
 Key patterns from implemented collectors:
-- Always wrap multi-word keywords in quotes for exact phrase matching (PapersCollector line 226, NewsCollector line 242)
-- Use .get() with defaults for all API response field access to prevent KeyError (PapersCollector lines 70, 78, 107; NewsCollector lines 86-88, 97-109)
-- Optional API key authentication via headers dict (PapersCollector lines 216-219; PatentsCollector requires key, NewsCollector does not)
+- Always wrap multi-word keywords in quotes for exact phrase matching (PapersCollector line 283, NewsCollector line 242)
+- Use .get() with defaults for all API response field access to prevent KeyError (PapersCollector lines 83-85, 92-151; NewsCollector lines 86-88, 97-109)
+- Optional API key authentication via headers dict (PapersCollector lines 270-273; PatentsCollector requires key, NewsCollector does not)
 - Manual URL encoding with urllib.parse.quote() for APIs that don't work with httpx params dict (PatentsCollector lines 313-318)
 - Use _text_all operator (not _text_any) for PatentsView API to prevent false positives (PatentsCollector lines 277-287)
 - Calculate derived insights from raw metrics for better LLM reasoning (all collectors)
@@ -600,7 +609,7 @@ Based on lessons learned from implemented collectors:
 
 **1. Exact Phrase Matching for Multi-Word Keywords**
 - Always wrap keywords in quotes for API searches to get exact phrase matches
-- Example: `query: f'"{keyword}"'` (PapersCollector line 226)
+- Example: `query: f'"{keyword}"'` (PapersCollector line 283)
 - Without quotes, "quantum computing" searches for "quantum" OR "computing" anywhere
 - With quotes, searches for exact phrase "quantum computing"
 - Reduces false positives by 99.9% for multi-word technology terms
@@ -636,11 +645,12 @@ response = await client.get(url, headers=headers)
 **5. Time-Scale Matching**
 - Match time windows to data source characteristics
 - Social media: 30 days, 6 months, 1 year (fast-moving)
-- Academic papers: 2 years, 5 years (slower cycles)
+- Academic papers: 2 years, 5 years, 10 years (slower cycles, long-term research trends)
 - Patents: 2 years, 5 years, 10 years (patent filing and grant cycles)
 - News media: 30 days, 3 months, 1 year (faster than patents, slower than social media)
 - Financial markets: 1 month, 6 months, 2 years (earnings cycles, market trend cycles)
 - Choose periods that reveal meaningful trends for that domain
+- Use non-overlapping windows to prevent double-counting (e.g., 2y: 2023-2024, 5y: 2018-2022, 10y: 2013-2017)
 
 **6. Manual URL Encoding Pattern (PatentsView API)**
 - CRITICAL: Some APIs don't work with httpx's built-in params dict encoding
@@ -914,7 +924,7 @@ C:\Users\Hp\Desktop\Gartner's Hype Cycle\
 │   │   │   ├── __init__.py
 │   │   │   ├── base.py          # Abstract BaseCollector interface
 │   │   │   ├── social.py        # Social media collector (IMPLEMENTED - Hacker News)
-│   │   │   ├── papers.py        # Research papers collector (IMPLEMENTED - Semantic Scholar)
+│   │   │   ├── papers.py        # Research papers collector (IMPLEMENTED - Semantic Scholar, 642 lines)
 │   │   │   ├── patents.py       # Patent collector (IMPLEMENTED - PatentsView)
 │   │   │   ├── news.py          # News collector (IMPLEMENTED - GDELT)
 │   │   │   └── finance.py       # Financial data collector (IMPLEMENTED - Yahoo Finance + DeepSeek)
@@ -933,7 +943,7 @@ C:\Users\Hp\Desktop\Gartner's Hype Cycle\
 │   ├── tests/                   # Test files
 │   │   ├── __init__.py
 │   │   ├── test_social_collector.py  # SocialCollector tests (14 tests)
-│   │   ├── test_papers_collector.py  # PapersCollector tests (18 tests)
+│   │   ├── test_papers_collector.py  # PapersCollector tests (25 tests)
 │   │   ├── test_patents_collector.py # PatentsCollector tests (20 tests)
 │   │   ├── test_news_collector.py    # NewsCollector tests (16 tests)
 │   │   ├── test_finance_collector.py # FinanceCollector tests (17 tests)
@@ -1084,16 +1094,21 @@ The SocialCollector has comprehensive test coverage (14 tests):
 - JSON serialization verification
 
 ### Papers Collector Test
-The PapersCollector has comprehensive test coverage (18 tests):
-- Success cases with typical API responses
+The PapersCollector has comprehensive test coverage (25 tests):
+- Success cases with typical API responses for all 3 time periods (2y, 5y, 10y)
 - Error handling (rate limits, timeouts, network errors, invalid queries)
 - Edge cases (zero results, partial failures, missing fields)
+- 10-year period fetching with non-overlapping time windows
+- Author aggregation across all periods (top 10 by publication count)
+- Paper type distribution analysis (5 categories: Review, JournalArticle, Conference, Book, Other)
+- Enhanced research maturity with type-aware thresholds (high review percentage = mature, high conference percentage = emerging)
+- Research maturity reasoning generation with detailed explanations
 - Citation velocity calculation (positive and negative)
-- Research maturity detection (emerging, developing, mature)
 - Research momentum detection (accelerating, steady, decelerating)
 - Research trend detection (increasing, stable, decreasing)
 - Research breadth detection (narrow, moderate, broad)
-- JSON serialization verification
+- Partial data handling (10y period failure while 2y/5y succeed)
+- JSON serialization verification for all new fields
 
 ### Patents Collector Test
 The PatentsCollector has comprehensive test coverage (20 tests):
