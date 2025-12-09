@@ -11,7 +11,6 @@ description: MVP application that analyzes emerging technologies and positions t
 ### High Priority
 
 ### Medium Priority
-- `m-implement-enhanced-papers-collector.md` - Enhance papers collector with 10-year analysis, top authors/institutions, and paper type distribution
 
 ### Low Priority
 
@@ -31,3 +30,4 @@ description: MVP application that analyzes emerging technologies and positions t
 - `h-fix-cache-persource-analyses.md` - Fix missing per_source_analyses data in cached database results via idempotent migration
 - `m-implement-niche-query-expansion.md` - Implement DeepSeek-based query expansion for niche technologies with low social media presence
 - `h-fix-deepseek-json-parsing.md` - Fix JSON parsing error in DeepSeek analyzer that causes analysis failures for certain keywords
+- `m-implement-enhanced-papers-collector.md` - Enhance papers collector with 10-year analysis, top authors, and paper type distribution

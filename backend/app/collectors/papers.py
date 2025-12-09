@@ -49,9 +49,16 @@ class PapersCollector(BaseCollector):
         collected_at = now.isoformat()
         current_year = now.year
 
-        # Calculate year boundaries for time periods
+        # Calculate year boundaries for time periods (non-overlapping)
+        # 2y: Recent papers (current_year - 2 to current_year - 1)
+        # 5y: Middle historical papers (current_year - 7 to current_year - 3)
+        # 10y: Oldest historical papers (current_year - 12 to current_year - 8)
         year_2y_start = current_year - 2
-        year_5y_start = current_year - 5
+        year_2y_end = current_year - 1
+        year_5y_start = current_year - 7
+        year_5y_end = current_year - 3
+        year_10y_start = current_year - 12
+        year_10y_end = current_year - 8
 
         errors = []
 
@@ -59,19 +66,23 @@ class PapersCollector(BaseCollector):
             async with httpx.AsyncClient(timeout=self.TIMEOUT) as client:
                 # Fetch data for each time period
                 data_2y = await self._fetch_period(
-                    client, keyword, year_2y_start, current_year, errors, expanded_terms
+                    client, keyword, year_2y_start, year_2y_end, errors, expanded_terms
                 )
                 data_5y = await self._fetch_period(
-                    client, keyword, year_5y_start, year_2y_start, errors, expanded_terms
+                    client, keyword, year_5y_start, year_5y_end, errors, expanded_terms
+                )
+                data_10y = await self._fetch_period(
+                    client, keyword, year_10y_start, year_10y_end, errors, expanded_terms
                 )
 
                 # If all requests failed, return error state
-                if all(d is None for d in [data_2y, data_5y]):
+                if all(d is None for d in [data_2y, data_5y, data_10y]):
                     return self._error_response(keyword, collected_at, "All API requests failed", errors)
 
                 # Extract publication counts
                 publications_2y = data_2y.get("total", 0) if data_2y else 0
                 publications_5y = data_5y.get("total", 0) if data_5y else 0
+                publications_10y = data_10y.get("total", 0) if data_10y else 0
 
                 # Calculate citation metrics for 2-year period
                 avg_citations_2y = 0.0
@@ -128,12 +139,38 @@ class PapersCollector(BaseCollector):
                     author_diversity = len(unique_authors)
                     venue_diversity = len(unique_venues)
 
+                # Calculate citation metrics for 10-year period
+                avg_citations_10y = 0.0
+                avg_influential_citations_10y = 0.0
+
+                if data_10y and data_10y.get("data"):
+                    papers = data_10y.get("data", [])
+                    total_citations = sum(p.get("citationCount", 0) or 0 for p in papers)
+                    total_influential = sum(p.get("influentialCitationCount", 0) or 0 for p in papers)
+                    avg_citations_10y = total_citations / len(papers) if papers else 0.0
+                    avg_influential_citations_10y = total_influential / len(papers) if papers else 0.0
+
+                # Aggregate all papers for paper type distribution analysis
+                all_papers = []
+                if data_2y and data_2y.get("data"):
+                    all_papers.extend(data_2y.get("data", []))
+                if data_5y and data_5y.get("data"):
+                    all_papers.extend(data_5y.get("data", []))
+                if data_10y and data_10y.get("data"):
+                    all_papers.extend(data_10y.get("data", []))
+
+                # Calculate paper type distribution
+                paper_type_distribution = self._calculate_paper_type_distribution(all_papers)
+
+                # Aggregate authors
+                top_authors = self._aggregate_authors(all_papers)
+
                 # Calculate derived insights
                 citation_velocity = self._calculate_citation_velocity(
                     avg_citations_2y, avg_citations_5y
                 )
-                research_maturity = self._calculate_research_maturity(
-                    publications_2y, publications_5y, avg_citations_2y
+                research_maturity, research_maturity_reasoning = self._calculate_research_maturity(
+                    publications_2y, publications_5y, publications_10y, avg_citations_2y, paper_type_distribution
                 )
                 research_momentum = self._calculate_research_momentum(
                     publications_2y, publications_5y
@@ -153,21 +190,31 @@ class PapersCollector(BaseCollector):
                     # Publication counts by time period
                     "publications_2y": publications_2y,
                     "publications_5y": publications_5y,
-                    "publications_total": publications_2y + publications_5y,
+                    "publications_10y": publications_10y,
+                    "publications_total": publications_2y + publications_5y + publications_10y,
 
                     # Citation metrics
                     "avg_citations_2y": round(avg_citations_2y, 2),
                     "avg_citations_5y": round(avg_citations_5y, 2),
+                    "avg_citations_10y": round(avg_citations_10y, 2),
                     "avg_influential_citations_2y": round(avg_influential_citations_2y, 2),
                     "avg_influential_citations_5y": round(avg_influential_citations_5y, 2),
+                    "avg_influential_citations_10y": round(avg_influential_citations_10y, 2),
                     "citation_velocity": round(citation_velocity, 3),
 
                     # Research breadth indicators
                     "author_diversity": author_diversity,
                     "venue_diversity": venue_diversity,
 
+                    # Author metrics
+                    "top_authors": top_authors,
+
+                    # Paper type analysis
+                    "paper_type_distribution": paper_type_distribution,
+
                     # Derived insights
                     "research_maturity": research_maturity,
+                    "research_maturity_reasoning": research_maturity_reasoning,
                     "research_momentum": research_momentum,
                     "research_trend": research_trend,
                     "research_breadth": research_breadth,
@@ -217,7 +264,7 @@ class PapersCollector(BaseCollector):
             year_filter = f"{year_start}-{year_end - 1}"
 
             # Request fields we need from the API
-            fields = "paperId,title,year,citationCount,influentialCitationCount,authors,venue"
+            fields = "paperId,title,year,citationCount,influentialCitationCount,authors,venue,publicationTypes"
 
             # Prepare headers with API key if configured
             settings = get_settings()
@@ -294,31 +341,69 @@ class PapersCollector(BaseCollector):
         return velocity
 
     def _calculate_research_maturity(
-        self, publications_2y: int, publications_5y: int, avg_citations_2y: float
-    ) -> str:
+        self,
+        publications_2y: int,
+        publications_5y: int,
+        publications_10y: int,
+        avg_citations_2y: float,
+        paper_type_distribution: Dict[str, Any]
+    ) -> tuple[str, str]:
         """
-        Calculate research maturity level based on publication and citation patterns.
+        Calculate research maturity level incorporating paper type distribution.
 
         Args:
             publications_2y: Publications in last 2 years
             publications_5y: Publications in prior 5 years
+            publications_10y: Publications in oldest 10 years
             avg_citations_2y: Average citations for recent papers
+            paper_type_distribution: Dict with type_percentages
 
         Returns:
-            "emerging", "developing", or "mature"
+            Tuple of (maturity_level, reasoning_string)
         """
-        total_publications = publications_2y + publications_5y
+        total_publications = publications_2y + publications_5y + publications_10y
+        type_percentages = paper_type_distribution.get("type_percentages", {})
 
-        # Mature: High publication count (>50) or high recent citations (>20)
-        if total_publications > 50 or avg_citations_2y > 20:
-            return "mature"
+        # Extract key paper type percentages
+        review_pct = type_percentages.get("review_percentage", 0.0)
+        journal_pct = type_percentages.get("journalarticle_percentage", 0.0)
+        conference_pct = type_percentages.get("conference_percentage", 0.0)
 
-        # Emerging: Very few publications (<10) and low citations (<5)
+        # Type-aware maturity classification
+        # Mature indicators: high review papers (>30%) OR high journal articles with substantial publications
+        if review_pct > 30:
+            return ("mature",
+                    f"High review paper percentage ({review_pct:.1f}%) indicates established field "
+                    f"with comprehensive synthesis literature. Total {total_publications} publications "
+                    f"with {avg_citations_2y:.1f} avg citations.")
+
+        if total_publications > 50 and journal_pct > 40:
+            return ("mature",
+                    f"Substantial publication volume ({total_publications} papers) dominated by "
+                    f"journal articles ({journal_pct:.1f}%) with {avg_citations_2y:.1f} avg citations "
+                    f"indicates mature research field.")
+
+        if avg_citations_2y > 20 and journal_pct > 30:
+            return ("mature",
+                    f"High citation rate ({avg_citations_2y:.1f} avg) with journal dominance "
+                    f"({journal_pct:.1f}%) indicates mature, impactful research field.")
+
+        # Emerging indicators: high conference papers (>60%) OR very few publications with low citations
+        if conference_pct > 60 and total_publications < 20:
+            return ("emerging",
+                    f"Conference paper dominance ({conference_pct:.1f}%) with limited publications "
+                    f"({total_publications}) indicates early-stage research with rapid dissemination focus.")
+
         if total_publications < 10 and avg_citations_2y < 5:
-            return "emerging"
+            return ("emerging",
+                    f"Very limited publications ({total_publications}) with low citations "
+                    f"({avg_citations_2y:.1f} avg) indicates emerging research area in early stages.")
 
-        # Developing: Everything in between
-        return "developing"
+        # Developing: transition phase
+        return ("developing",
+                f"Moderate publication volume ({total_publications}) with mixed paper types "
+                f"(conference: {conference_pct:.1f}%, journal: {journal_pct:.1f}%, review: {review_pct:.1f}%) "
+                f"and {avg_citations_2y:.1f} avg citations indicates developing research field in transition.")
 
     def _calculate_research_momentum(self, publications_2y: int, publications_5y: int) -> str:
         """
@@ -421,6 +506,84 @@ class PapersCollector(BaseCollector):
         # Moderate: Everything in between
         return "moderate"
 
+    def _calculate_paper_type_distribution(self, all_papers: List[Dict]) -> Dict[str, Any]:
+        """
+        Analyze distribution of paper types across all papers.
+
+        Args:
+            all_papers: List of all papers from all time periods
+
+        Returns:
+            Dictionary with type_counts, type_percentages, and papers_with_type_info
+        """
+        type_counts = {
+            "Review": 0,
+            "JournalArticle": 0,
+            "Conference": 0,
+            "Book": 0,
+            "Other": 0
+        }
+
+        total_with_types = 0
+        for paper in all_papers:
+            pub_types = paper.get("publicationTypes", [])
+            if pub_types:
+                total_with_types += 1
+                # A paper can have multiple types, count each
+                for pub_type in pub_types:
+                    if pub_type in type_counts:
+                        type_counts[pub_type] += 1
+                    else:
+                        type_counts["Other"] += 1
+
+        # Calculate percentages
+        type_percentages = {}
+        if total_with_types > 0:
+            for type_name, count in type_counts.items():
+                type_percentages[f"{type_name.lower()}_percentage"] = round(
+                    (count / total_with_types) * 100, 1
+                )
+        else:
+            # No type data available - set all to 0
+            for type_name in type_counts.keys():
+                type_percentages[f"{type_name.lower()}_percentage"] = 0.0
+
+        return {
+            "type_counts": type_counts,
+            "type_percentages": type_percentages,
+            "papers_with_type_info": total_with_types
+        }
+
+    def _aggregate_authors(self, all_papers: List[Dict]) -> List[Dict[str, Any]]:
+        """
+        Aggregate authors across all papers and return top 10 by publication count.
+
+        Args:
+            all_papers: List of all papers from all time periods
+
+        Returns:
+            List of top 10 authors with publication counts
+        """
+        author_counts = {}
+        for paper in all_papers:
+            authors = paper.get("authors", [])
+            for author in authors:
+                name = author.get("name", "")
+                if name:
+                    author_counts[name] = author_counts.get(name, 0) + 1
+
+        # Sort by count and return top 10
+        top_authors = [
+            {"name": name, "publication_count": count}
+            for name, count in sorted(
+                author_counts.items(),
+                key=lambda x: x[1],
+                reverse=True
+            )[:10]
+        ]
+
+        return top_authors
+
     def _error_response(
         self,
         keyword: str,
@@ -446,15 +609,31 @@ class PapersCollector(BaseCollector):
             "keyword": keyword,
             "publications_2y": 0,
             "publications_5y": 0,
+            "publications_10y": 0,
             "publications_total": 0,
             "avg_citations_2y": 0.0,
             "avg_citations_5y": 0.0,
+            "avg_citations_10y": 0.0,
             "avg_influential_citations_2y": 0.0,
             "avg_influential_citations_5y": 0.0,
+            "avg_influential_citations_10y": 0.0,
             "citation_velocity": 0.0,
             "author_diversity": 0,
             "venue_diversity": 0,
+            "top_authors": [],
+            "paper_type_distribution": {
+                "type_counts": {"Review": 0, "JournalArticle": 0, "Conference": 0, "Book": 0, "Other": 0},
+                "type_percentages": {
+                    "review_percentage": 0.0,
+                    "journalarticle_percentage": 0.0,
+                    "conference_percentage": 0.0,
+                    "book_percentage": 0.0,
+                    "other_percentage": 0.0
+                },
+                "papers_with_type_info": 0
+            },
             "research_maturity": "unknown",
+            "research_maturity_reasoning": "Data collection failed - unable to assess research maturity",
             "research_momentum": "unknown",
             "research_trend": "unknown",
             "research_breadth": "unknown",
