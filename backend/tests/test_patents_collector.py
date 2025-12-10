@@ -10,8 +10,13 @@ from app.collectors.patents import PatentsCollector
 
 
 @pytest.fixture(autouse=True)
-def mock_settings():
+def mock_settings(request):
     """Mock settings for all tests to avoid needing .env file"""
+    # Skip mocking for tests marked with 'real_api'
+    if 'real_api' in request.keywords:
+        yield None
+        return
+
     mock_settings_obj = Mock()
     mock_settings_obj.patentsview_api_key = "test_api_key_12345"
     with patch("app.collectors.patents.get_settings", return_value=mock_settings_obj):
@@ -598,3 +603,388 @@ async def test_patents_collector_missing_api_key(mock_settings):
     assert result["patents_total"] == 0
     assert len(result["errors"]) > 0
     assert any("Missing PatentsView API key" in err for err in result["errors"])
+
+
+# ========== Assignee Classification Tests ==========
+
+@pytest.mark.asyncio
+async def test_assignee_classification_university():
+    """Test classification of university assignees"""
+    collector = PatentsCollector()
+
+    # Mock response with university assignees
+    mock_response = {
+        "error": False,
+        "total_hits": 3,
+        "patents": [
+            {
+                "patent_id": "123",
+                "patent_title": "Quantum Research",
+                "patent_date": "2023-01-01",
+                "assignees": [
+                    {"assignee_organization": "Stanford University", "assignee_type": 4, "assignee_country": "US"}
+                ],
+                "patent_num_times_cited_by_us_patents": "10"
+            },
+            {
+                "patent_id": "124",
+                "patent_title": "Quantum Algorithm",
+                "patent_date": "2023-02-01",
+                "assignees": [
+                    {"assignee_organization": "MIT", "assignee_type": 4, "assignee_country": "US"}
+                ],
+                "patent_num_times_cited_by_us_patents": "5"
+            },
+            {
+                "patent_id": "125",
+                "patent_title": "Quantum Device",
+                "patent_date": "2023-03-01",
+                "assignees": [
+                    {"assignee_organization": "University of California Berkeley", "assignee_type": 4, "assignee_country": "US"}
+                ],
+                "patent_num_times_cited_by_us_patents": "8"
+            }
+        ]
+    }
+
+    with patch("httpx.AsyncClient.get", new_callable=AsyncMock) as mock_get:
+        mock_response_obj = Mock()
+        mock_response_obj.json.return_value = mock_response
+        mock_get.return_value = mock_response_obj
+
+        result = await collector.collect("quantum computing")
+
+        # Verify university classification
+        assert result["university_ratio"] > 90.0  # Should be ~100% universities
+        assert result["innovation_stage"] == "early_research"
+        assert "University" in result["assignee_type_distribution"]
+
+        # Verify top assignees have type field
+        assert len(result["top_assignees"]) > 0
+        assert "type" in result["top_assignees"][0]
+        assert result["top_assignees"][0]["type"] == "University"
+
+
+@pytest.mark.asyncio
+async def test_assignee_classification_research_institute():
+    """Test classification of research institute assignees"""
+    collector = PatentsCollector()
+
+    # Mock response with research institute assignees
+    mock_response = {
+        "error": False,
+        "total_hits": 3,
+        "patents": [
+            {
+                "patent_id": "123",
+                "patent_title": "Quantum Research",
+                "patent_date": "2023-01-01",
+                "assignees": [
+                    {"assignee_organization": "Max Planck Institute", "assignee_type": 4, "assignee_country": "DE"}
+                ],
+                "patent_num_times_cited_by_us_patents": "10"
+            },
+            {
+                "patent_id": "124",
+                "patent_title": "Quantum Algorithm",
+                "patent_date": "2023-02-01",
+                "assignees": [
+                    {"assignee_organization": "Sandia National Laboratories", "assignee_type": 6, "assignee_country": "US"}
+                ],
+                "patent_num_times_cited_by_us_patents": "5"
+            },
+            {
+                "patent_id": "125",
+                "patent_title": "Quantum Device",
+                "patent_date": "2023-03-01",
+                "assignees": [
+                    {"assignee_organization": "Fraunhofer Society", "assignee_type": 4, "assignee_country": "DE"}
+                ],
+                "patent_num_times_cited_by_us_patents": "8"
+            }
+        ]
+    }
+
+    with patch("httpx.AsyncClient.get", new_callable=AsyncMock) as mock_get:
+        mock_response_obj = Mock()
+        mock_response_obj.json.return_value = mock_response
+        mock_get.return_value = mock_response_obj
+
+        result = await collector.collect("quantum computing")
+
+        # Verify research institute classification
+        assert result["assignee_type_distribution"]["Research Institute"] > 90.0
+        assert result["academic_ratio"] > 90.0  # Universities + Research Institutes
+
+        # Verify top assignees have correct type
+        research_institutes = [a for a in result["top_assignees"] if a["type"] == "Research Institute"]
+        assert len(research_institutes) > 0
+
+
+@pytest.mark.asyncio
+async def test_assignee_classification_mixed():
+    """Test mixed assignee types with distribution calculation"""
+    collector = PatentsCollector()
+
+    # Mock response with 40% University, 30% Corporate, 20% Research Institute, 10% Government
+    mock_response = {
+        "error": False,
+        "total_hits": 10,
+        "patents": [
+            # 4 University patents
+            {"patent_id": "1", "patent_title": "Test", "patent_date": "2023-01-01",
+             "assignees": [{"assignee_organization": "Stanford University", "assignee_type": 4}],
+             "patent_num_times_cited_by_us_patents": "10"},
+            {"patent_id": "2", "patent_title": "Test", "patent_date": "2023-01-01",
+             "assignees": [{"assignee_organization": "MIT", "assignee_type": 4}],
+             "patent_num_times_cited_by_us_patents": "10"},
+            {"patent_id": "3", "patent_title": "Test", "patent_date": "2023-01-01",
+             "assignees": [{"assignee_organization": "Harvard University", "assignee_type": 4}],
+             "patent_num_times_cited_by_us_patents": "10"},
+            {"patent_id": "4", "patent_title": "Test", "patent_date": "2023-01-01",
+             "assignees": [{"assignee_organization": "Yale University", "assignee_type": 4}],
+             "patent_num_times_cited_by_us_patents": "10"},
+
+            # 3 Corporate patents
+            {"patent_id": "5", "patent_title": "Test", "patent_date": "2023-01-01",
+             "assignees": [{"assignee_organization": "IBM", "assignee_type": 4}],
+             "patent_num_times_cited_by_us_patents": "10"},
+            {"patent_id": "6", "patent_title": "Test", "patent_date": "2023-01-01",
+             "assignees": [{"assignee_organization": "Google LLC", "assignee_type": 4}],
+             "patent_num_times_cited_by_us_patents": "10"},
+            {"patent_id": "7", "patent_title": "Test", "patent_date": "2023-01-01",
+             "assignees": [{"assignee_organization": "Microsoft", "assignee_type": 4}],
+             "patent_num_times_cited_by_us_patents": "10"},
+
+            # 2 Research Institute patents
+            {"patent_id": "8", "patent_title": "Test", "patent_date": "2023-01-01",
+             "assignees": [{"assignee_organization": "Max Planck Institute", "assignee_type": 4}],
+             "patent_num_times_cited_by_us_patents": "10"},
+            {"patent_id": "9", "patent_title": "Test", "patent_date": "2023-01-01",
+             "assignees": [{"assignee_organization": "Fraunhofer Society", "assignee_type": 4}],
+             "patent_num_times_cited_by_us_patents": "10"},
+
+            # 1 Government patent
+            {"patent_id": "10", "patent_title": "Test", "patent_date": "2023-01-01",
+             "assignees": [{"assignee_organization": "US Department of Energy", "assignee_type": 7}],
+             "patent_num_times_cited_by_us_patents": "10"},
+        ]
+    }
+
+    with patch("httpx.AsyncClient.get", new_callable=AsyncMock) as mock_get:
+        mock_response_obj = Mock()
+        mock_response_obj.json.return_value = mock_response
+        mock_get.return_value = mock_response_obj
+
+        result = await collector.collect("quantum computing")
+
+        # Verify distribution percentages
+        dist = result["assignee_type_distribution"]
+        assert dist["University"] == 40.0
+        assert dist["Corporate"] == 30.0
+        assert dist["Research Institute"] == 20.0
+        assert dist["Government"] == 10.0
+        assert dist["Individual"] == 0.0
+
+        # Verify derived metrics
+        assert result["university_ratio"] == 40.0
+        assert result["academic_ratio"] == 60.0  # 40% Uni + 20% Research
+        # With only 10 patents and 60% academic ratio, this is classified as early_research
+        # (low patent count + academic dominance triggers early research classification)
+        assert result["innovation_stage"] == "early_research"
+
+
+@pytest.mark.asyncio
+async def test_assignee_type_distribution_calculation():
+    """Test percentage math in type distribution calculation"""
+    collector = PatentsCollector()
+
+    # Test with exact percentages
+    classified_assignees = [
+        "University", "University", "University", "University", "University",  # 5
+        "Corporate", "Corporate", "Corporate",  # 3
+        "Research Institute", "Research Institute"  # 2
+    ]
+
+    result = collector._calculate_assignee_type_distribution(classified_assignees)
+
+    assert result["total_assignees"] == 10
+    assert result["type_percentages"]["University"] == 50.0
+    assert result["type_percentages"]["Corporate"] == 30.0
+    assert result["type_percentages"]["Research Institute"] == 20.0
+    assert result["type_percentages"]["Government"] == 0.0
+    assert result["type_percentages"]["Individual"] == 0.0
+
+
+@pytest.mark.asyncio
+async def test_university_ratio_calculation():
+    """Test university ratio calculation"""
+    collector = PatentsCollector()
+
+    type_distribution = {
+        "type_percentages": {
+            "University": 45.5,
+            "Corporate": 30.0,
+            "Research Institute": 20.0,
+            "Government": 4.5,
+            "Individual": 0.0
+        }
+    }
+
+    ratio = collector._calculate_university_ratio(type_distribution)
+    assert ratio == 45.5
+
+
+@pytest.mark.asyncio
+async def test_commercialization_index_high():
+    """Test high commercialization index with corporate dominance"""
+    collector = PatentsCollector()
+
+    type_distribution = {
+        "type_percentages": {
+            "University": 5.0,
+            "Corporate": 85.0,
+            "Research Institute": 5.0,
+            "Government": 5.0,
+            "Individual": 0.0
+        }
+    }
+
+    index = collector._calculate_commercialization_index(type_distribution)
+    # Corporate 85% / Academic 10% = 8.5
+    assert index == 8.5
+    assert index > 2.0  # Strong commercial adoption threshold
+
+
+@pytest.mark.asyncio
+async def test_innovation_stage_early():
+    """Test early research stage classification with high university ratio"""
+    collector = PatentsCollector()
+
+    type_distribution = {
+        "type_percentages": {
+            "University": 60.0,
+            "Corporate": 20.0,
+            "Research Institute": 15.0,
+            "Government": 5.0,
+            "Individual": 0.0
+        }
+    }
+
+    stage, reasoning = collector._calculate_innovation_stage(type_distribution, 60.0, 50)
+
+    assert stage == "early_research"
+    assert "60.0%" in reasoning
+    assert "academic institutions" in reasoning.lower()
+
+
+@pytest.mark.asyncio
+async def test_innovation_stage_commercialized():
+    """Test commercialized stage classification with corporate dominance"""
+    collector = PatentsCollector()
+
+    type_distribution = {
+        "type_percentages": {
+            "University": 5.0,
+            "Corporate": 85.0,
+            "Research Institute": 5.0,
+            "Government": 5.0,
+            "Individual": 0.0
+        }
+    }
+
+    stage, reasoning = collector._calculate_innovation_stage(type_distribution, 5.0, 500)
+
+    assert stage == "commercialized"
+    assert "85.0%" in reasoning
+    assert "commercialization" in reasoning.lower()
+
+
+@pytest.mark.asyncio
+async def test_pattern_matching_edge_cases():
+    """Test pattern matching with ambiguous and international names"""
+    collector = PatentsCollector()
+
+    # Test various edge cases
+    assert collector._classify_assignee("Université de Paris", 4) == "University"  # French
+    assert collector._classify_assignee("Università di Bologna", 4) == "University"  # Italian
+    assert collector._classify_assignee("ETH Zurich", 4) == "University"  # Abbreviation
+    assert collector._classify_assignee("Max Planck Institut für Physik", 4) == "Research Institute"  # German
+    assert collector._classify_assignee("IBM Research", 4) == "Corporate"  # Corporate research exception
+    assert collector._classify_assignee("Google Research", 4) == "Corporate"  # Corporate research exception
+    assert collector._classify_assignee("Sandia National Laboratories", 6) == "Research Institute"  # Government lab
+    assert collector._classify_assignee("NIST", 4) == "Research Institute"  # Abbreviation
+    assert collector._classify_assignee("Individual", None) == "Individual"  # Individual assignee
+    assert collector._classify_assignee("", 3) == "Individual"  # Empty string with individual type
+    assert collector._classify_assignee("US Department of Energy", 7) == "Government"  # Government type code
+    assert collector._classify_assignee("John Smith", 3) == "Individual"  # Individual type code
+    assert collector._classify_assignee("Acme Corporation", 4) == "Corporate"  # Generic corporate
+
+
+@pytest.mark.real_api
+@pytest.mark.asyncio
+async def test_assignee_classification_real_api_validation():
+    """
+    Integration test with real PatentsView API for assignee classification.
+    Tests two keywords: one early-stage (expect high university ratio) and one mature (expect high corporate ratio).
+
+    This test is skipped by default to avoid hitting the real API during routine testing.
+    Run with: pytest -v -k real_api_validation
+    """
+    pytest.skip("Skipping real API test by default - remove this line to enable")
+
+    collector = PatentsCollector()
+
+    # Test 1: Simplified early-stage technology (just "CRISPR")
+    result_early = await collector.collect("CRISPR")
+
+    # Debug: Print errors if any
+    if result_early["patents_total"] == 0:
+        print(f"\nCRISPR - Errors: {result_early.get('errors', [])}")
+        print(f"CRISPR - Full result: {result_early}")
+
+    assert result_early["patents_total"] > 0
+    assert "university_ratio" in result_early
+    assert "academic_ratio" in result_early
+    assert "commercialization_index" in result_early
+    assert "innovation_stage" in result_early
+    assert "assignee_type_distribution" in result_early
+
+    # Print all classification metrics
+    print(f"\n=== CRISPR Classification Metrics ===")
+    print(f"Total patents: {result_early['patents_total']}")
+    print(f"University ratio: {result_early['university_ratio']:.1f}%")
+    print(f"Academic ratio: {result_early['academic_ratio']:.1f}%")
+    print(f"Commercialization index: {result_early['commercialization_index']:.2f}")
+    print(f"Innovation stage: {result_early['innovation_stage']}")
+    print(f"Type distribution: {result_early['assignee_type_distribution']}")
+    print(f"Top assignees: {result_early['top_assignees'][:3]}")
+
+    # Test 2: Mature technology (should have high corporate ratio)
+    result_mature = await collector.collect("quantum computing")
+
+    # Debug: Print errors if any
+    if result_mature["patents_total"] == 0:
+        print(f"\nQuantum Computing - Errors: {result_mature.get('errors', [])}")
+
+    assert result_mature["patents_total"] > 0
+    assert "university_ratio" in result_mature
+    assert "commercialization_index" in result_mature
+    assert "innovation_stage" in result_mature
+    assert "assignee_type_distribution" in result_mature
+
+    # Print all classification metrics
+    print(f"\n=== Quantum Computing Classification Metrics ===")
+    print(f"Total patents: {result_mature['patents_total']}")
+    print(f"University ratio: {result_mature['university_ratio']:.1f}%")
+    print(f"Academic ratio: {result_mature['academic_ratio']:.1f}%")
+    print(f"Commercialization index: {result_mature['commercialization_index']:.2f}")
+    print(f"Innovation stage: {result_mature['innovation_stage']}")
+    print(f"Type distribution: {result_mature['assignee_type_distribution']}")
+    print(f"Top assignees: {result_mature['top_assignees'][:3]}")
+
+    # Verify that mature tech has higher commercialization than early-stage tech
+    print(f"\n=== Comparison ===")
+    print(f"CRISPR commercialization index: {result_early['commercialization_index']:.2f}")
+    print(f"Quantum commercialization index: {result_mature['commercialization_index']:.2f}")
+    assert result_mature["commercialization_index"] > result_early["commercialization_index"]

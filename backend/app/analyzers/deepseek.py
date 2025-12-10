@@ -278,6 +278,8 @@ Data provided:
 - Geographic reach: {data.get('geographic_reach', 'unknown')}
 - Patent maturity: {data.get('patent_maturity', 'unknown')}
 - Patent momentum: {data.get('patent_momentum', 'unknown')}
+- Assignee classification: university_ratio={data.get('university_ratio', 0):.1f}%, academic_ratio={data.get('academic_ratio', 0):.1f}%, commercialization_index={data.get('commercialization_index', 0):.2f}
+- Innovation stage: {data.get('innovation_stage', 'unknown')}
 
 {self.PHASE_DEFINITIONS}
 
@@ -287,6 +289,12 @@ Interpretation guidance:
 - trough: Declining filings from peak, consolidation (fewer assignees), slowing velocity
 - slope: Steady filings, maturing patents, diverse assignees, moderate citations
 - plateau: Stable filing rate, established field, high citations, global coverage
+
+Assignee type distribution indicates technology maturity:
+- High university ratio (>40%) suggests early research phase (innovation_trigger or early peak)
+- Balanced academic/corporate mix (30-70%) suggests transition phase (peak or slope)
+- Corporate dominance (>70%) with low academic (<20%) suggests commercialization (slope or plateau)
+- Commercialization index >2.0 indicates strong commercial adoption
 
 Based on these patent signals, classify the hype cycle phase.
 

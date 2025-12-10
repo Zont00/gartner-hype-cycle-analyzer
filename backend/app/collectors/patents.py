@@ -98,18 +98,35 @@ class PatentsCollector(BaseCollector):
                 if data_10y and data_10y.get("patents"):
                     all_patents.extend(data_10y.get("patents", []))
 
-                # Extract assignee diversity metrics
+                # Extract assignee diversity metrics with type classification
                 assignee_counts = {}
+                assignee_types = {}  # Map org name -> assignee type
+                classified_assignees = []  # List of all classified types for distribution calculation
+
                 for patent in all_patents:
                     assignees = patent.get("assignees", [])
                     for assignee in assignees:
                         org = assignee.get("assignee_organization", "Individual")
+                        assignee_type_code = assignee.get("assignee_type")
+
                         if org:
+                            # Count patents per assignee
                             assignee_counts[org] = assignee_counts.get(org, 0) + 1
+
+                            # Classify assignee type (only once per unique org)
+                            if org not in assignee_types:
+                                assignee_types[org] = self._classify_assignee(org, assignee_type_code)
+
+                            # Track all classifications for distribution calculation
+                            classified_assignees.append(assignee_types[org])
 
                 unique_assignees = len(assignee_counts)
                 top_assignees = [
-                    {"name": name, "patent_count": count}
+                    {
+                        "name": name,
+                        "patent_count": count,
+                        "type": assignee_types.get(name, "Corporate")
+                    }
                     for name, count in sorted(
                         assignee_counts.items(),
                         key=lambda x: x[1],
@@ -199,6 +216,15 @@ class PatentsCollector(BaseCollector):
                 patent_momentum = self._calculate_patent_momentum(patents_2y, patents_5y)
                 patent_trend = self._calculate_patent_trend(patents_2y, patents_5y)
 
+                # Calculate assignee type distribution and derived metrics
+                assignee_type_distribution = self._calculate_assignee_type_distribution(classified_assignees)
+                university_ratio = self._calculate_university_ratio(assignee_type_distribution)
+                academic_ratio = self._calculate_academic_ratio(assignee_type_distribution)
+                commercialization_index = self._calculate_commercialization_index(assignee_type_distribution)
+                innovation_stage, innovation_stage_reasoning = self._calculate_innovation_stage(
+                    assignee_type_distribution, university_ratio, patents_2y + patents_5y + patents_10y
+                )
+
                 return {
                     "source": "patentsview",
                     "collected_at": collected_at,
@@ -213,6 +239,14 @@ class PatentsCollector(BaseCollector):
                     # Assignee diversity metrics
                     "unique_assignees": unique_assignees,
                     "top_assignees": top_assignees,
+
+                    # Assignee type classification metrics
+                    "assignee_type_distribution": assignee_type_distribution.get("type_percentages", {}),
+                    "university_ratio": university_ratio,
+                    "academic_ratio": academic_ratio,
+                    "commercialization_index": commercialization_index,
+                    "innovation_stage": innovation_stage,
+                    "innovation_stage_reasoning": innovation_stage_reasoning,
 
                     # Geographic distribution
                     "countries": country_counts,
@@ -312,6 +346,7 @@ class PatentsCollector(BaseCollector):
 
             # Fields to retrieve (use patent_id not patent_number)
             # Citation field: patent_num_times_cited_by_us_patents
+            # Note: assignee_type is nested inside assignees object, not a top-level field
             fields = [
                 "patent_id",
                 "patent_title",
@@ -551,6 +586,232 @@ class PatentsCollector(BaseCollector):
         # Stable: Within 30% range
         return "stable"
 
+    def _classify_assignee(self, assignee_org: str, assignee_type: Optional[int] = None) -> str:
+        """
+        Classify assignee into one of 5 categories based on organization name and type code.
+
+        Uses pattern matching on organization names to identify universities and research
+        institutes, then falls back to assignee_type codes for government/individual
+        classification.
+
+        Args:
+            assignee_org: Organization name (e.g., "MIT", "IBM", "Stanford University")
+            assignee_type: Optional PatentsView assignee_type code (1-9)
+
+        Returns:
+            One of: "University", "Research Institute", "Corporate", "Government", "Individual"
+        """
+        if not assignee_org or assignee_org == "Individual":
+            return "Individual"
+
+        # Normalize for case-insensitive matching
+        org_lower = assignee_org.lower()
+
+        # Priority 1: Check for University patterns
+        university_keywords = [
+            "university", "universit",  # International variations (université, università, etc.)
+            "college",
+            " state",  # Space prefix to avoid matching "estate", "restate", etc.
+            " tech ",  # Space-bounded to avoid "technology", "technical"
+        ]
+        university_abbreviations = [
+            "mit", "caltech", "eth", "epfl", "cmu", "ucla", "ucb", "nyu"
+        ]
+
+        for keyword in university_keywords:
+            if keyword in org_lower:
+                # Special case: "College of" might be corporate training
+                if keyword == "college" and "college of" in org_lower:
+                    continue
+                return "University"
+
+        # Check for common university abbreviations (as whole words)
+        org_words = org_lower.split()
+        for abbrev in university_abbreviations:
+            if abbrev in org_words:
+                return "University"
+
+        # Priority 2: Check for Research Institute patterns
+        institute_keywords = [
+            "institute", "institut",  # International variations
+            "research center", "research centre",
+            "laboratory", "laborator",  # Catches "laboratories"
+            "national lab",  # "Sandia National Laboratories"
+            "max planck",  # Max Planck Institute
+            "fraunhofer",  # Fraunhofer Society
+            "cnrs",  # French National Centre for Scientific Research
+            "nist",  # National Institute of Standards and Technology
+        ]
+
+        # Special handling for corporate research labs vs. research institutes
+        # "IBM Research" should be Corporate, "Sandia National Laboratories" should be Research Institute
+        corporate_research_exceptions = [
+            "ibm research", "microsoft research", "google research", "amazon research",
+            "facebook research", "meta research", "apple research", "intel research"
+        ]
+
+        # Check for corporate research exceptions first
+        is_corporate_research = any(exc in org_lower for exc in corporate_research_exceptions)
+
+        if not is_corporate_research:
+            for keyword in institute_keywords:
+                if keyword in org_lower:
+                    return "Research Institute"
+
+        # Priority 3: Check assignee_type code for Government/Individual
+        # Based on typical patent database conventions:
+        # - Code 2-3: Individual/inventor
+        # - Code 4-5: Company/organization
+        # - Code 6-7: Government entity
+        if assignee_type is not None:
+            if assignee_type in [2, 3]:
+                return "Individual"
+            elif assignee_type in [6, 7]:
+                return "Government"
+
+        # Priority 4: Default to Corporate
+        # If no university/institute patterns matched and not government/individual by type code
+        return "Corporate"
+
+    def _calculate_assignee_type_distribution(self, classified_assignees: List[str]) -> Dict[str, Any]:
+        """
+        Calculate percentage distribution of assignee types.
+
+        Args:
+            classified_assignees: List of all assignee type classifications
+
+        Returns:
+            Dictionary with type counts and percentages for each category
+        """
+        # Count each type
+        type_counts = {
+            "University": 0,
+            "Research Institute": 0,
+            "Corporate": 0,
+            "Government": 0,
+            "Individual": 0
+        }
+
+        for assignee_type in classified_assignees:
+            if assignee_type in type_counts:
+                type_counts[assignee_type] += 1
+
+        # Calculate percentages
+        total = len(classified_assignees)
+        type_percentages = {}
+        if total > 0:
+            for type_name, count in type_counts.items():
+                type_percentages[type_name] = round((count / total) * 100, 1)
+        else:
+            # No assignees - set all to 0
+            for type_name in type_counts.keys():
+                type_percentages[type_name] = 0.0
+
+        return {
+            "type_counts": type_counts,
+            "type_percentages": type_percentages,
+            "total_assignees": total
+        }
+
+    def _calculate_university_ratio(self, type_distribution: Dict[str, Any]) -> float:
+        """
+        Calculate percentage of university assignees.
+
+        Args:
+            type_distribution: Output from _calculate_assignee_type_distribution()
+
+        Returns:
+            University percentage (0-100)
+        """
+        return type_distribution.get("type_percentages", {}).get("University", 0.0)
+
+    def _calculate_academic_ratio(self, type_distribution: Dict[str, Any]) -> float:
+        """
+        Calculate percentage of academic assignees (universities + research institutes).
+
+        Args:
+            type_distribution: Output from _calculate_assignee_type_distribution()
+
+        Returns:
+            Academic percentage (0-100)
+        """
+        percentages = type_distribution.get("type_percentages", {})
+        university = percentages.get("University", 0.0)
+        research_institute = percentages.get("Research Institute", 0.0)
+        return round(university + research_institute, 1)
+
+    def _calculate_commercialization_index(self, type_distribution: Dict[str, Any]) -> float:
+        """
+        Calculate commercialization index (corporate / academic ratio).
+
+        Higher values indicate stronger commercial adoption.
+
+        Args:
+            type_distribution: Output from _calculate_assignee_type_distribution()
+
+        Returns:
+            Commercialization index (0+ where >2.0 indicates strong commercial adoption)
+        """
+        percentages = type_distribution.get("type_percentages", {})
+        corporate = percentages.get("Corporate", 0.0)
+        university = percentages.get("University", 0.0)
+        research_institute = percentages.get("Research Institute", 0.0)
+        academic = university + research_institute
+
+        # Handle edge case: no academic assignees
+        if academic == 0:
+            # If corporate presence but no academic, high commercialization
+            return 10.0 if corporate > 0 else 0.0
+
+        return round(corporate / academic, 2)
+
+    def _calculate_innovation_stage(
+        self,
+        type_distribution: Dict[str, Any],
+        university_ratio: float,
+        total_patents: int
+    ) -> tuple[str, str]:
+        """
+        Determine innovation stage based on assignee type distribution and patent volume.
+
+        Args:
+            type_distribution: Output from _calculate_assignee_type_distribution()
+            university_ratio: Percentage of university assignees
+            total_patents: Total number of patents
+
+        Returns:
+            Tuple of (stage, reasoning) where stage is one of:
+            - "early_research": Dominated by academic research
+            - "developing": Transitioning from academic to commercial
+            - "commercialized": Corporate dominance with commercial adoption
+        """
+        percentages = type_distribution.get("type_percentages", {})
+        corporate = percentages.get("Corporate", 0.0)
+        academic_ratio = percentages.get("University", 0.0) + percentages.get("Research Institute", 0.0)
+
+        # Early research stage: High university ratio (>40%) or low patent count with academic dominance
+        if university_ratio > 40 or (total_patents < 50 and academic_ratio > 50):
+            reasoning = (
+                f"High university presence ({university_ratio:.1f}%) with {total_patents} total patents "
+                f"indicates early research phase dominated by academic institutions"
+            )
+            return ("early_research", reasoning)
+
+        # Commercialized stage: Corporate dominance (>70%) with low academic (<20%)
+        if corporate > 70 and academic_ratio < 20:
+            reasoning = (
+                f"Corporate dominance ({corporate:.1f}%) with low academic presence ({academic_ratio:.1f}%) "
+                f"indicates mature commercialization across {total_patents} patents"
+            )
+            return ("commercialized", reasoning)
+
+        # Developing stage: Balanced mix or transition period
+        reasoning = (
+            f"Balanced distribution (academic: {academic_ratio:.1f}%, corporate: {corporate:.1f}%) "
+            f"across {total_patents} patents indicates transition from research to commercial adoption"
+        )
+        return ("developing", reasoning)
+
     def _error_response(
         self,
         keyword: str,
@@ -580,6 +841,12 @@ class PatentsCollector(BaseCollector):
             "patents_total": 0,
             "unique_assignees": 0,
             "top_assignees": [],
+            "assignee_type_distribution": {},
+            "university_ratio": 0.0,
+            "academic_ratio": 0.0,
+            "commercialization_index": 0.0,
+            "innovation_stage": "unknown",
+            "innovation_stage_reasoning": "Insufficient data",
             "countries": {},
             "geographic_diversity": 0,
             "avg_citations_2y": 0.0,

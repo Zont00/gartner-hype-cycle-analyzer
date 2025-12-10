@@ -16,7 +16,8 @@
       "Bash(cat:*)",
       "Bash(sessions/bin/sessions.bat protocol startup-load sessions/tasks/h-implement-social-collector.md)",
       "WebSearch",
-      "WebFetch(domain:medium.com)"
+      "WebFetch(domain:medium.com)",
+      "Bash(python -m pytest:*)"
     ],
     "deny": [],
     "ask": []

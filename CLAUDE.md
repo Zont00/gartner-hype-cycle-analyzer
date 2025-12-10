@@ -149,16 +149,23 @@ The application follows a three-tier architecture:
 - CRITICAL: Query operator: _text_all for keyword matching in patent_title and patent_abstract fields (ensures ALL words present, prevents false positives)
 - **Query Expansion Support** (IMPLEMENTED - patents.py:215-320): Constructs nested OR clauses with _or wrapping multiple _text_all clauses for each term, maintaining exact phrase matching per term
 - Metrics returned: patents_2y, patents_5y, patents_10y, patents_total
-- Assignee metrics: unique_assignees, top_assignees (top 5 by patent count)
+- Assignee metrics: unique_assignees, top_assignees (top 5 by patent count with type classification)
+- **Assignee Type Classification** (IMPLEMENTED - patents.py:555-796): Classifies assignees into 5 categories (University, Research Institute, Corporate, Government, Individual) using pattern matching on organization names and assignee_type codes
+  - Pattern matching: Case-insensitive keyword matching for universities ("university", "college", "MIT", "Caltech") and research institutes ("institute", "laboratory", "Max Planck", "Fraunhofer", "NIST")
+  - Type code fallback: Uses assignee_type codes (2-3: Individual, 6-7: Government, 4-5: Corporate) when pattern matching doesn't match academic institutions
+  - Corporate research exceptions: "IBM Research", "Google Research", etc. classified as Corporate (not Research Institute)
+  - New metrics: assignee_type_distribution (percentage breakdown), university_ratio, academic_ratio, commercialization_index (corporate/academic ratio), innovation_stage (early_research/developing/commercialized), innovation_stage_reasoning
+  - Interpretation: High university ratio (>40%) indicates early research phase; corporate dominance (>70%) with low academic (<20%) indicates commercialization; balanced mix indicates transition phase
+  - Commercialization index >2.0 indicates strong commercial adoption
 - Geographic distribution: countries dict with patent counts, geographic_diversity
 - Citation metrics: avg_citations_2y, avg_citations_5y
 - Derived insights: filing_velocity, assignee_concentration (concentrated/moderate/diverse), geographic_reach (domestic/regional/global), patent_maturity (emerging/developing/mature), patent_momentum (accelerating/steady/decelerating), patent_trend (increasing/stable/decreasing)
 - Returns top 5 patents sorted by citation count with patent numbers, titles, dates, assignees, countries for LLM context
 - API key authentication: Required via X-Api-Key header (configured through PATENTSVIEW_API_KEY env var)
 - Graceful error handling with safe dictionary access using .get() to prevent KeyError on inconsistent API responses
-- Handles missing fields (assignees, assignee_country, citation counts may be null/missing)
-- Test suite: 20 passing tests covering success, errors, edge cases, authentication (C:\Users\Hp\Desktop\Gartner's Hype Cycle\backend\tests\test_patents_collector.py)
-- Real API validation: Successfully tested with "quantum computing" using _text_all operator (889 patents found with 96% reduction in false positives, 84 unique assignees, 16 countries)
+- Handles missing fields (assignees, assignee_country, assignee_type, citation counts may be null/missing)
+- Test suite: 30 passing tests covering success, errors, edge cases, authentication, assignee classification (university/research institute/corporate/government/individual), type distribution calculation, pattern matching edge cases, innovation stage classification (C:\Users\Hp\Desktop\Gartner's Hype Cycle\backend\tests\test_patents_collector.py)
+- Real API validation: Successfully tested with "quantum computing" using _text_all operator (889 patents found with 96% reduction in false positives, 84 unique assignees, 16 countries); assignee classification validated with CRISPR (early-stage, high university ratio) and cloud computing (mature, high corporate ratio)
 
 **News Collector** (C:\Users\Hp\Desktop\Gartner's Hype Cycle\backend\app\collectors\news.py) - IMPLEMENTED
 - Queries GDELT Doc API v2 (https://api.gdeltproject.org/api/v2/doc/doc)
