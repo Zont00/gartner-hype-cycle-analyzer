@@ -9,6 +9,7 @@ description: MVP application that analyzes emerging technologies and positions t
 ## Active Tasks
 
 ### High Priority
+- `h-implement-assignee-classification.md` - Enhance PatentsCollector with assignee type classification (University/Research/Corporate/Government) for better technology maturity analysis
 
 ### Medium Priority
 
